@@ -38,8 +38,13 @@ def main():
         background_image = Image.open("test.png")
         original_image_size = background_image.size  # Stockage de la taille originale de l'image
         background_photo = ImageTk.PhotoImage(background_image)
+
+        # Set .png image as the window icon
+        icon_image = Image.open("cat.png")
+        window.iconphoto(False, ImageTk.PhotoImage(icon_image))
+
     except Exception as e:
-        print(f"Failed to load background image: {e}")
+        print(f"Failed to load images: {e}")
         return
 
     canvas = tk.Canvas(window)
