@@ -10,6 +10,7 @@ resize_timer = None
 # Configure logging
 configure_logging()
 
+
 def resize_background(event, window):
     global resize_timer
     if resize_timer:
