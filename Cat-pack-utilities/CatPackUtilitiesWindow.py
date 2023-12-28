@@ -1,6 +1,10 @@
 import glfw
 from OpenGL.GL import *
 import OpenGL.GL.shaders as shaders
+import ctypes
+
+def window_resize(window, width, height):
+    glViewport(0, 0, width, height)
 
 def main():
     # Initialize the library
@@ -13,13 +17,17 @@ def main():
         glfw.terminate()
         return
 
+    # Set callbacks
+    glfw.set_window_size_callback(window, window_resize)
+
     # Make the window's context current
     glfw.make_context_current(window)
 
-    # Define the vertices of a triangle
+    # Define the vertices of a rectangle (button)
     vertices = [-0.5, -0.5, 0.0,  # Bottom-left corner
                 0.5, -0.5, 0.0,  # Bottom-right corner
-                0.0, 0.5, 0.0]   # Top-center corner
+                0.5, 0.5, 0.0,   # Top-right corner
+                -0.5, 0.5, 0.0]  # Top-left corner
 
     vertices = (GLfloat * len(vertices))(*vertices)
 
@@ -66,10 +74,10 @@ def main():
         # Clear the screen
         glClear(GL_COLOR_BUFFER_BIT)
 
-        # Draw the triangle
+        # Draw the button
         glUseProgram(shader)
         glBindVertexArray(VAO)
-        glDrawArrays(GL_TRIANGLES, 0, 3)
+        glDrawArrays(GL_QUADS, 0, 4)  # Draw a rectangle (button)
 
         # Swap front and back buffers
         glfw.swap_buffers(window)
