@@ -1,11 +1,14 @@
+import logging
 import tkinter as tk
 from PIL import Image, ImageTk
-import cProfile
-from functools import partial  
+from functools import partial
+from logging_config import configure_logging
 
 original_image_size = None
-
 resize_timer = None
+
+# Configure logging
+configure_logging()
 
 def resize_background(event, window):
     global resize_timer
@@ -14,6 +17,7 @@ def resize_background(event, window):
 
     # Schedule a new timer to update the image after a delay (e.g., 100 milliseconds)
     resize_timer = window.after(100, partial(update_background, event, window))
+
 
 def update_background(event, window):
     global background_photo, background_image, background_canvas, original_image_size
@@ -43,13 +47,14 @@ def update_background(event, window):
     canvas.itemconfig(background_canvas, image=background_photo)
 
 
-
 def main():
     global background_image, background_photo, canvas, background_canvas, original_image_size
 
+    logging.info("Launching the application.")
+
     window = tk.Tk()
     window.title("Cat Pack Utilities V0.1")
-    window.geometry("1280x720") # Set the default window size
+    window.geometry("1280x720")  # Set the default window size
 
     try:
         background_image = Image.open("test.png")
@@ -61,7 +66,7 @@ def main():
         window.iconphoto(False, ImageTk.PhotoImage(icon_image))
 
     except Exception as e:
-        print(f"Failed to load images: {e}")
+        logging.error(f"Failed to load images: {e}")
         return
 
     canvas = tk.Canvas(window)
@@ -71,14 +76,7 @@ def main():
 
     window.bind("<Configure>", partial(resize_background, window=window))
 
-    # Profiling the application
-    profiler = cProfile.Profile()
-    profiler.enable()
-
     window.mainloop()
-
-    profiler.disable()
-    profiler.print_stats(sort='cumtime')
 
 
 if __name__ == "__main__":
