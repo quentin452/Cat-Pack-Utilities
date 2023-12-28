@@ -1,23 +1,28 @@
-import logging
 import tkinter as tk
-from PIL import Image, ImageTk
 from functools import partial
+
+from PIL import Image, ImageTk
+import os
+import logging
 from logging_config import configure_logging
+
+configure_logging()
 
 original_image_size = None
 resize_timer = None
-
-# Configure logging
-configure_logging()
+first_launch = True  # Flag to indicate the first launch
 
 
 def resize_background(event, window):
-    global resize_timer
+    global resize_timer, first_launch
     if resize_timer:
         window.after_cancel(resize_timer)  # Cancel previous timer (if any)
 
-    # Schedule a new timer to update the image after a delay (e.g., 100 milliseconds)
-    resize_timer = window.after(100, partial(update_background, event, window))
+    if first_launch:
+        update_background(event, window)
+        first_launch = False
+    else:
+        resize_timer = window.after(100, partial(update_background, event, window))
 
 
 def update_background(event, window):
@@ -48,6 +53,11 @@ def update_background(event, window):
     canvas.itemconfig(background_canvas, image=background_photo)
 
 
+def createButton(button_frame, text):
+    button = tk.Button(button_frame, text=text)
+    button.pack(side=tk.LEFT, padx=5, pady=5)
+
+
 def main():
     global background_image, background_photo, canvas, background_canvas, original_image_size
 
@@ -69,8 +79,19 @@ def main():
     except Exception as e:
         logging.error(f"Failed to load images: {e}")
         return
+    # Create a frame for the buttons
+    button_frame = tk.Frame(window)
+    button_frame.pack(side=tk.BOTTOM, fill=tk.X)
 
-    canvas = tk.Canvas(window)
+    # Create buttons programmatically
+    for i in range(1, 11):
+        createButton(button_frame, f"Button {i}")
+    # Create a frame for the canvas
+    canvas_frame = tk.Frame(window)
+    canvas_frame.pack(fill=tk.BOTH, expand=True)
+
+    # Create canvas within the frame
+    canvas = tk.Canvas(canvas_frame)
     canvas.pack(fill=tk.BOTH, expand=True)
 
     background_canvas = canvas.create_image(0, 0, anchor=tk.NW, image=background_photo)
