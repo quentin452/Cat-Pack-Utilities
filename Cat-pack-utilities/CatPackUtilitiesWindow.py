@@ -1,5 +1,6 @@
 import tkinter as tk
 from PIL import Image, ImageTk
+import cProfile
 
 original_image_size = None
 
@@ -27,16 +28,17 @@ def resize_background(event):
     canvas.itemconfig(background_canvas, image=background_photo)
 
 
+
 def main():
     global background_image, background_photo, canvas, background_canvas, original_image_size
 
     window = tk.Tk()
     window.title("Cat Pack Utilities V0.1")
-    window.geometry("1280x720")  # Définition de la taille de fenêtre par défaut
+    window.geometry("1280x720") # Set the default window size
 
     try:
         background_image = Image.open("test.png")
-        original_image_size = background_image.size  # Stockage de la taille originale de l'image
+        original_image_size = background_image.size # Store the original size of the image
         background_photo = ImageTk.PhotoImage(background_image)
 
         # Set .png image as the window icon
@@ -54,8 +56,14 @@ def main():
 
     window.bind("<Configure>", resize_background)
 
+    # Profiling the application
+    profiler = cProfile.Profile()
+    profiler.enable()
+
     window.mainloop()
 
+    profiler.disable()
+    profiler.print_stats(sort='cumtime')
 
 if __name__ == "__main__":
     main()
