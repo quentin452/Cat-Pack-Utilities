@@ -2,24 +2,35 @@ import glfw
 from OpenGL.GL import *
 import OpenGL.GL.shaders as shaders
 import ctypes
+import logging
+from logging_config import configure_logging
+
+# Configure logging
+configure_logging()
 
 def window_resize(window, width, height):
     glViewport(0, 0, width, height)
 
 def main():
+    logging.info("Initializing GLFW")
     # Initialize the library
     if not glfw.init():
+        logging.error("GLFW initialization failed")
         return
 
+    logging.info("Creating window")
     # Create a windowed mode window and its OpenGL context
     window = glfw.create_window(1280, 720, "OpenGL Window", None, None)
     if not window:
+        logging.error("Window or OpenGL context creation failed")
         glfw.terminate()
         return
 
+    logging.info("Setting window resize callback")
     # Set callbacks
     glfw.set_window_size_callback(window, window_resize)
 
+    logging.info("Making context current")
     # Make the window's context current
     glfw.make_context_current(window)
 
@@ -63,8 +74,8 @@ def main():
     VBO = glGenBuffers(1)
     glBindVertexArray(VAO)
     glBindBuffer(GL_ARRAY_BUFFER, VBO)
-    glBufferData(GL_ARRAY_BUFFER, len(vertices) * sizeof(GLfloat), vertices, GL_STATIC_DRAW)
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), ctypes.c_void_p(0))
+    glBufferData(GL_ARRAY_BUFFER, len(vertices) * ctypes.sizeof(GLfloat), vertices, GL_STATIC_DRAW)
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * ctypes.sizeof(GLfloat), ctypes.c_void_p(0))
     glEnableVertexAttribArray(0)
     glBindBuffer(GL_ARRAY_BUFFER, 0)
     glBindVertexArray(0)
@@ -86,7 +97,9 @@ def main():
         glfw.poll_events()
 
     # Terminate GLFW and cleanup
+    logging.info("Closing the application")
     glfw.terminate()
+
 
 if __name__ == "__main__":
     main()
