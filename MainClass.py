@@ -1,11 +1,9 @@
 import tkinter as tk
-import ctypes
-from ctypes import wintypes
 from PIL import Image, ImageTk
 from Catpackutilities.logging_config import configure_logging
 import subprocess
 import sys
-import time 
+import time
 
 configure_logging()
 
@@ -18,10 +16,36 @@ resize_timer = None
 last_width = 0
 last_height = 0
 
+class FPSCounter:
+    def __init__(self):
+        self.frames = 0
+        self.start_time = time.time()
+
+    def count_frame(self):
+        self.frames += 1
+
+    def get_fps(self):
+        current_time = time.time()
+        elapsed_time = current_time - self.start_time
+        if elapsed_time > 1:  # Calculate FPS every second
+            fps = self.frames / elapsed_time
+            self.frames = 0
+            self.start_time = current_time
+            return fps
+        return None
+
+fps_counter = FPSCounter()  # Create an instance of the FPSCounter
+
+def update_fps_label():
+    global fps_label
+    fps = fps_counter.get_fps()
+    if fps is not None:
+        fps_label.config(text=f"FPS: {fps:.2f}")  # Update the label with FPS value
+    root.after(1000, update_fps_label)  # Update FPS label every second
+
 def get_screen_resolution():
     user32 = ctypes.windll.user32
     return user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
-
 
 def get_taskbar_height():
     hwnd = ctypes.windll.user32.FindWindowW("Shell_TrayWnd", None)
@@ -59,7 +83,6 @@ def resize_background(event):
         last_width = event.width
         last_height = event.height
         resize_image(event.width, event.height)
-        # adjust_button_position(event.width, event.height)
 
 def adjust_button_position(new_width, new_height):
     global button
@@ -98,7 +121,7 @@ def create_buttons_on_canvas():
     button.place(x=(screen_width - 200) / 2, y=(screen_height - 100) / 2)
 
 def main():
-    global root, canvas, background_photo, button, background_image, fps_counter
+    global root, canvas, background_photo, button, background_image, fps_label
 
     root = tk.Tk()
     root.title("Cat Pack Utilities V0.1")
@@ -111,14 +134,43 @@ def main():
     canvas = tk.Canvas(root)
     canvas.pack(fill=tk.BOTH, expand=True)
 
-    background_image = Image.open("Catpackutilities/test.png")
+    # Replace the video capture with an image
+    image_path = "Catpackutilities/test.png"  # Replace with your image path
+    background_image = Image.open(image_path)
     background_photo = ImageTk.PhotoImage(background_image)
 
     canvas.create_image(0, 0, anchor=tk.NW, image=background_photo, tags="bg_image")
 
     create_buttons_on_canvas()
+    start_time = time.time()
+    frame_count = 0
+    
+    # Function to update FPS label every 200 milliseconds
+    def update_fps():
+        nonlocal frame_count, start_time
+        end_time = time.time()
+        delta_time = end_time - start_time
 
-    root.bind("<Configure>", resize_background)
+        if delta_time > 0:  # Calculate FPS if time has elapsed
+            fps = frame_count / delta_time
+            fps_label.config(text=f"FPS: {fps:.2f}")
+
+            # Log FPS to console
+            #print(f"FPS: {fps:.2f}")  # Print FPS value to console
+
+            frame_count = 0  # Reset frame count
+            start_time = time.time()  # Reset start time
+
+        frame_count += 1  # Increment frame count for each frame processed
+
+        root.after(8, update_fps)  # Update FPS label every 200 milliseconds
+
+    # Create and place a label to display FPS in top-left corner
+    fps_label = tk.Label(root, text="", bg="black", fg="white")
+    fps_label.place(x=10, y=10)
+
+    #root.bind("<Configure>", resize_background)
+    update_fps()  # Start updating the FPS label
 
     root.mainloop()
 
