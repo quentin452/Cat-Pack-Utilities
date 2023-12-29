@@ -145,7 +145,7 @@ def main():
     start_time = time.time()
     frame_count = 0
     
-    # Function to update FPS label every 200 milliseconds
+    # Function to update FPS label every 8 milliseconds
     def update_fps():
         nonlocal frame_count, start_time
         end_time = time.time()
@@ -163,7 +163,7 @@ def main():
 
         frame_count += 1  # Increment frame count for each frame processed
 
-        root.after(8, update_fps)  # Update FPS label every 200 milliseconds
+        root.after(8, update_fps)  # Update FPS label every 8 milliseconds
 
     # Create and place a label to display FPS in top-left corner
     fps_label = tk.Label(root, text="", bg="black", fg="white")
