@@ -1,6 +1,7 @@
 import tkinter as tk
 from PIL import Image, ImageTk
 from Catpackutilities.logging_config import configure_logging
+from Catpackutilities.fps_counter import FPSCounter
 import subprocess
 import sys
 import time
@@ -16,33 +17,6 @@ resize_timer = None
 last_width = 0
 last_height = 0
 
-class FPSCounter:
-    def __init__(self):
-        self.frames = 0
-        self.start_time = time.time()
-
-    def count_frame(self):
-        self.frames += 1
-
-    def get_fps(self):
-        current_time = time.time()
-        elapsed_time = current_time - self.start_time
-        if elapsed_time > 1:  # Calculate FPS every second
-            fps = self.frames / elapsed_time
-            self.frames = 0
-            self.start_time = current_time
-            return fps
-        return None
-
-fps_counter = FPSCounter()  # Create an instance of the FPSCounter
-
-def update_fps_label():
-    global fps_label
-    fps = fps_counter.get_fps()
-    if fps is not None:
-        fps_label.config(text=f"FPS: {fps:.2f}")  # Update the label with FPS value
-    root.after(1000, update_fps_label)  # Update FPS label every second
-
 def get_screen_resolution():
     user32 = ctypes.windll.user32
     return user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
@@ -53,22 +27,34 @@ def get_taskbar_height():
     ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect))
     return rect.bottom - rect.top
 
+def adjust_button_position(new_width, new_height):
+    global button
+    if button:
+        button.place(x=(new_width - 200) / 2, y=(new_height - 100) / 2)
+
 def resize_background(event):
     global last_width, last_height
-    if event.width != last_width or event.height != last_height:
-        last_width = event.width
-        last_height = event.height
-        resize_image(event.width, event.height)
-        adjust_button_position(event.width, event.height)
+    current_width = root.winfo_width()
+    current_height = root.winfo_height()
+
+    if current_width != last_width or current_height != last_height:
+        last_width = current_width
+        last_height = current_height
+        resize_image(current_width, current_height)
+        adjust_button_position(current_width, current_height)
 
 def resize_image(new_width, new_height):
     global background_photo, background_image, canvas
 
-    min_width = 400
-    min_height = 300
+    # Define your minimum ratio here (for example, 0.5 means half of the application size)
+    min_ratio = 1
 
-    new_width = max(new_width, min_width)
-    new_height = max(new_height, min_height)
+    # Application width and height
+    application_width = root.winfo_screenwidth()
+    application_height = root.winfo_screenheight()
+
+    min_width = max(int(application_width * min_ratio), 200)  # Minimum width at least 200
+    min_height = max(int(application_height * min_ratio), 200)  # Minimum height at least 200
 
     resized_image = background_image.resize((new_width, new_height), Image.BILINEAR)
     background_photo = ImageTk.PhotoImage(resized_image)
@@ -77,12 +63,6 @@ def resize_image(new_width, new_height):
     canvas.delete("bg_image")
     canvas.create_image(0, 0, anchor=tk.NW, image=background_photo, tags="bg_image")
 
-def resize_background(event):
-    global last_width, last_height
-    if event.width != last_width or event.height != last_height:
-        last_width = event.width
-        last_height = event.height
-        resize_image(event.width, event.height)
 
 def adjust_button_position(new_width, new_height):
     global button
@@ -106,7 +86,7 @@ def revert_button_text():
         button["text"] = "Word Name Searching"
 
 def create_buttons_on_canvas():
-    global button
+    global button, root
 
     screen_width = root.winfo_screenwidth()
     screen_height = root.winfo_screenheight()
@@ -121,7 +101,7 @@ def create_buttons_on_canvas():
     button.place(x=(screen_width - 200) / 2, y=(screen_height - 100) / 2)
 
 def main():
-    global root, canvas, background_photo, button, background_image, fps_label
+    global root, canvas, background_photo, button, background_image, fps_label, last_width, last_height
 
     root = tk.Tk()
     root.title("Cat Pack Utilities V0.1")
@@ -145,34 +125,29 @@ def main():
     start_time = time.time()
     frame_count = 0
     
-    # Function to update FPS label every 8 milliseconds
-    def update_fps():
-        nonlocal frame_count, start_time
-        end_time = time.time()
-        delta_time = end_time - start_time
-
-        if delta_time > 0:  # Calculate FPS if time has elapsed
-            fps = frame_count / delta_time
-            fps_label.config(text=f"FPS: {fps:.2f}")
-
-            # Log FPS to console
-            #print(f"FPS: {fps:.2f}")  # Print FPS value to console
-
-            frame_count = 0  # Reset frame count
-            start_time = time.time()  # Reset start time
-
-        frame_count += 1  # Increment frame count for each frame processed
-
-        root.after(8, update_fps)  # Update FPS label every 8 milliseconds
-
     # Create and place a label to display FPS in top-left corner
     fps_label = tk.Label(root, text="", bg="black", fg="white")
     fps_label.place(x=10, y=10)
+    
+    fps_counter = FPSCounter()
 
-    #root.bind("<Configure>", resize_background)
-    update_fps()  # Start updating the FPS label
+    def update_fps():
+        fps_counter.update_fps(root)
+        fps_counter.update_fps_label(root, fps_label)
+    
+    root.after(8, update_fps)
+
+    root.bind("<Configure>", resize_background)
+
+    last_width = root.winfo_width()
+    last_height = root.winfo_height()
 
     root.mainloop()
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        import traceback
+        print("An error occurred:")
+        traceback.print_exc()
