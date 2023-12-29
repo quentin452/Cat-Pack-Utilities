@@ -60,7 +60,7 @@ def create_buttons_on_canvas(canvas):
 
 
 def main():
-    global background_image, background_photo, canvas, background_canvas, original_image_size
+    global original_image_size
     window = tk.Tk()
     window.title("Cat Pack Utilities V0.1")
 
@@ -82,7 +82,7 @@ def main():
     icon_image = Image.open("cat.png")
     window.iconphoto(False, ImageTk.PhotoImage(icon_image))
 
-    background_canvas = canvas.create_image(0, 0, anchor=tk.NW, image=background_photo)
+    canvas.create_image(0, 0, anchor=tk.NW, image=background_photo)
 
     create_buttons_on_canvas(canvas)
 
