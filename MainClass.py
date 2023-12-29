@@ -2,7 +2,7 @@ import tkinter as tk
 import ctypes
 from ctypes import wintypes
 from PIL import Image, ImageTk
-from logging_config import configure_logging
+from Catpackutilities.logging_config import configure_logging
 import subprocess
 import sys
 configure_logging()
@@ -43,7 +43,7 @@ def update_background(event, window):
     original_image_size = resized_image.size
 """
 def run_word_name_searching():
-    subprocess.Popen([sys.executable, "utilities/word_or_name_searching.py"], creationflags=subprocess.CREATE_NEW_CONSOLE)
+    subprocess.Popen([sys.executable, "Catpackutilities/utilities/word_or_name_searching.py"], creationflags=subprocess.CREATE_NEW_CONSOLE)
 
 
 def create_buttons_on_canvas(canvas):
@@ -53,7 +53,7 @@ def create_buttons_on_canvas(canvas):
     center_x = (screen_width - button_width) / 2
     center_y = (screen_height - 30) / 2
 
-    button_texture = Image.open("button1.png")
+    button_texture = Image.open("Catpackutilities/button1.png")
     button_texture = button_texture.resize((200, 100), Image.BILINEAR)
     button_texture = ImageTk.PhotoImage(button_texture)
 
@@ -79,11 +79,11 @@ def main():
     canvas = tk.Canvas(window)
     canvas.pack(fill=tk.BOTH, expand=True)
 
-    background_image = Image.open("test.png")
+    background_image = Image.open("Catpackutilities/test.png")
     original_image_size = background_image.size
     background_photo = ImageTk.PhotoImage(background_image)
 
-    icon_image = Image.open("cat.png")
+    icon_image = Image.open("Catpackutilities/cat.png")
     window.iconphoto(False, ImageTk.PhotoImage(icon_image))
 
     canvas.create_image(0, 0, anchor=tk.NW, image=background_photo)
