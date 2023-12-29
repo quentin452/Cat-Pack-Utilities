@@ -86,19 +86,19 @@ while True:
 
         def scan_zip(path):
             try:
-                zip = ZipFile(path)
+                _zip = ZipFile(path)
             except BadZipFile:
                 logging.warning(f"Skipped {path}: Not a valid ZIP file")
                 return []  # Return an empty list when encountering a bad ZIP file
 
             found_files = []
 
-            for name in zip.namelist():
+            for name in _zip.namelist():
                 # Check if the file extension is in the list of excluded extensions
                 if any(name.lower().endswith(ext) for ext in excluded_extensions):
                     continue  # Skip excluded file types
 
-                content = zip.read(name).decode("latin-1")  # Decode content from ZIP file
+                content = _zip.read(name).decode("latin-1")  # Decode content from ZIP file
                 content_lower = content.lower()  # Convert content to lowercase for case-insensitive comparison
 
                 if (deep_scan and query.lower() in content_lower) or (not deep_scan and query.lower() in name.lower()):

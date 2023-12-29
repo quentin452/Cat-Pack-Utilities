@@ -3,7 +3,8 @@ import ctypes
 from ctypes import wintypes
 from PIL import Image, ImageTk
 from logging_config import configure_logging
-
+import subprocess
+import sys
 configure_logging()
 
 original_image_size = None
@@ -41,6 +42,8 @@ def update_background(event, window):
     canvas.itemconfig(background_canvas, image=background_photo)
     original_image_size = resized_image.size
 """
+def run_word_name_searching():
+    subprocess.Popen([sys.executable, "utilities/word_or_name_searching.py"], creationflags=subprocess.CREATE_NEW_CONSOLE)
 
 
 def create_buttons_on_canvas(canvas):
@@ -54,7 +57,8 @@ def create_buttons_on_canvas(canvas):
     button_texture = button_texture.resize((200, 100), Image.BILINEAR)
     button_texture = ImageTk.PhotoImage(button_texture)
 
-    button = tk.Button(canvas, text="Word Name Searching", image=button_texture, compound=tk.CENTER)
+    button = tk.Button(canvas, text="Word Name Searching", image=button_texture, compound=tk.CENTER,
+                       command=run_word_name_searching)
     button.image = button_texture
     button.place(x=center_x, y=center_y)
 
