@@ -58,7 +58,7 @@ def main():
 
     create_buttons_on_canvas(canvas)
 
-    window.bind("<Configure>", lambda event: resize_background(event, window))
+    window.bind("<Configure>")
 
     window.mainloop()
 
