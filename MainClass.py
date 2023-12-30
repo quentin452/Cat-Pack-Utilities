@@ -1,22 +1,27 @@
 import tkinter as tk
-import ctypes
-from ctypes import wintypes
+from tkinter import font
 from PIL import Image, ImageTk
 from Catpackutilities.logging_config import configure_logging
+from Catpackutilities.fps_counter import FPSCounter
 import subprocess
+import os
 import sys
+import time
+
 configure_logging()
 
-original_image_size = None
+root = None
+canvas = None
+background_photo = None
+button = None
+background_image = None
 resize_timer = None
-first_launch = True  # Flag to indicate the first launch
-canvas_frame = None  # Global canvas_frame variable
-
+last_width = 0
+last_height = 0
 
 def get_screen_resolution():
     user32 = ctypes.windll.user32
     return user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
-
 
 def get_taskbar_height():
     hwnd = ctypes.windll.user32.FindWindowW("Shell_TrayWnd", None)
@@ -24,78 +29,129 @@ def get_taskbar_height():
     ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect))
     return rect.bottom - rect.top
 
+def adjust_button_position(new_width, new_height):
+    global button
+    if button:
+        button.place(x=(new_width - 200) / 2, y=(new_height - 100) / 2)
 
-""""
-def resize_background(event, window):
-    global resize_timer
-    if resize_timer:
-        window.after_cancel(resize_timer)  # Cancel previous timer (if any)
-    resize_timer = window.after(100, update_background, event, window)
+def resize_background(event):
+    global last_width, last_height
+    current_width = root.winfo_width()
+    current_height = root.winfo_height()
 
+    if current_width != last_width or current_height != last_height:
+        last_width = current_width
+        last_height = current_height
+        resize_image(current_width, current_height)
+        adjust_button_position(current_width, current_height)
 
-def update_background(event, window):
-    global background_photo, background_image, background_canvas, original_image_size
-    new_width = event.width
-    new_height = event.height
+def resize_image(new_width, new_height):
+    global background_photo, background_image, canvas
+
+    # Define your minimum ratio here (for example, 0.5 means half of the application size)
+    min_ratio = 1
+
+    # Application width and height
+    application_width = root.winfo_screenwidth()
+    application_height = root.winfo_screenheight()
+
+    min_width = max(int(application_width * min_ratio), 200)  # Minimum width at least 200
+    min_height = max(int(application_height * min_ratio), 200)  # Minimum height at least 200
+
     resized_image = background_image.resize((new_width, new_height), Image.BILINEAR)
     background_photo = ImageTk.PhotoImage(resized_image)
-    canvas.itemconfig(background_canvas, image=background_photo)
-    original_image_size = resized_image.size
-"""
+
+    canvas.config(width=new_width, height=new_height)
+    canvas.delete("bg_image")
+    canvas.create_image(0, 0, anchor=tk.NW, image=background_photo, tags="bg_image")
+
+
+def adjust_button_position(new_width, new_height):
+    global button
+    if button:
+        button.place(x=(new_width - 200) / 2, y=(new_height - 100) / 2)
+
 def run_word_name_searching():
     subprocess.Popen([sys.executable, "Catpackutilities/utilities/word_or_name_searching.py"], creationflags=subprocess.CREATE_NEW_CONSOLE)
+    change_button_text()
 
+def change_button_text():
+    global button
+    if button:
+        if button["text"] == "Word Name Searching":
+            button["text"] = "Clicked!"
+            root.after(3000, revert_button_text)  # Change back after 3000 milliseconds (3 seconds)
 
-def create_buttons_on_canvas(canvas):
-    screen_width, screen_height = get_screen_resolution()
-    button_width = 100
+def revert_button_text():
+    global button
+    if button:
+        button["text"] = "Word Name Searching"
 
-    center_x = (screen_width - button_width) / 2
-    center_y = (screen_height - 30) / 2
+def create_buttons_on_canvas():
+    global button, root
+
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
 
     button_texture = Image.open("Catpackutilities/button1.png")
     button_texture = button_texture.resize((200, 100), Image.BILINEAR)
     button_texture = ImageTk.PhotoImage(button_texture)
 
-    button = tk.Button(canvas, text="Word Name Searching", image=button_texture, compound=tk.CENTER,
-                       command=run_word_name_searching)
+    button = tk.Button(root, text="Word Name Searching", image=button_texture,
+                   compound=tk.CENTER, command=run_word_name_searching,
+                   borderwidth=0, relief="flat", highlightthickness=0,
+                   activebackground=root.cget("bg"), highlightbackground=root.cget("bg"),
+                   padx=0, pady=0)
     button.image = button_texture
-    button.place(x=center_x, y=center_y)
-
+    button.place(x=(screen_width - 200) / 2, y=(screen_height - 100) / 2)
 
 def main():
-    global original_image_size
-    window = tk.Tk()
-    window.title("Cat Pack Utilities V0.1")
+    global root, canvas, background_photo, button, background_image, fps_label, last_width, last_height
 
-    screen_width, screen_height = get_screen_resolution()
-    taskbar_height = get_taskbar_height()
-    window_width = screen_width
-    window_height = screen_height - taskbar_height  # Subtract taskbar height
-    window.geometry(f"{window_width}x{window_height}+0+0")  # Fullscreen without taskbar
+    root = tk.Tk()
+    root.title("Cat Pack Utilities V0.1")
 
-    window.state('zoomed')
+    desired_font = font.Font(family="Arial", size=12)
+    for widget in [root] + root.winfo_children():
+        widget.option_add("*Font", desired_font)
 
-    canvas = tk.Canvas(window)
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+
+    root.state('zoomed')
+
+    canvas = tk.Canvas(root)
     canvas.pack(fill=tk.BOTH, expand=True)
 
-    background_image = Image.open("Catpackutilities/test.png")
-    original_image_size = background_image.size
+    # Replace the video capture with an image
+    image_path = "Catpackutilities/test.png"  # Replace with your image path
+    background_image = Image.open(image_path)
     background_photo = ImageTk.PhotoImage(background_image)
 
-    icon_image = Image.open("Catpackutilities/cat.png")
-    window.iconphoto(False, ImageTk.PhotoImage(icon_image))
+    canvas.create_image(0, 0, anchor=tk.NW, image=background_photo, tags="bg_image")
 
-    canvas.create_image(0, 0, anchor=tk.NW, image=background_photo)
+    create_buttons_on_canvas()
+    start_time = time.time()
+    frame_count = 0
+    
+    # Create and place a label to display FPS in top-left corner
+    fps_label = tk.Label(root, text="", bg="black", fg="white")
+    fps_label.place(x=10, y=10)
+    
+    fps_counter = FPSCounter()
 
-    create_buttons_on_canvas(canvas)
+    def update_fps():
+        fps_counter.update_fps(root)
+        fps_counter.update_fps_label(root, fps_label)
+    
+    root.after(8, update_fps)
 
-    window.bind("<Configure>")
-    """
-    window.bind("<Configure>", lambda event: resize_background(event, window))
-    """
-    window.mainloop()
+    root.bind("<Configure>", resize_background)
 
+    last_width = root.winfo_width()
+    last_height = root.winfo_height()
+
+    root.mainloop()
 
 if __name__ == "__main__":
     main()
