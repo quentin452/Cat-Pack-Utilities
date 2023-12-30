@@ -1,4 +1,5 @@
 app_logs.log
 app_logs_backup.zip
 .idea
+/logs/
 __pycache__
