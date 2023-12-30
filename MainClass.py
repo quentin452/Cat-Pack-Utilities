@@ -1,8 +1,10 @@
 import tkinter as tk
+from tkinter import font
 from PIL import Image, ImageTk
 from Catpackutilities.logging_config import configure_logging
 from Catpackutilities.fps_counter import FPSCounter
 import subprocess
+import os
 import sys
 import time
 
@@ -95,8 +97,11 @@ def create_buttons_on_canvas():
     button_texture = button_texture.resize((200, 100), Image.BILINEAR)
     button_texture = ImageTk.PhotoImage(button_texture)
 
-    button = tk.Button(root, text="Word Name Searching", image=button_texture, compound=tk.CENTER,
-                       command=run_word_name_searching)
+    button = tk.Button(root, text="Word Name Searching", image=button_texture,
+                   compound=tk.CENTER, command=run_word_name_searching,
+                   borderwidth=0, relief="flat", highlightthickness=0,
+                   activebackground=root.cget("bg"), highlightbackground=root.cget("bg"),
+                   padx=0, pady=0)
     button.image = button_texture
     button.place(x=(screen_width - 200) / 2, y=(screen_height - 100) / 2)
 
@@ -105,6 +110,10 @@ def main():
 
     root = tk.Tk()
     root.title("Cat Pack Utilities V0.1")
+
+    desired_font = font.Font(family="Arial", size=12)
+    for widget in [root] + root.winfo_children():
+        widget.option_add("*Font", desired_font)
 
     screen_width = root.winfo_screenwidth()
     screen_height = root.winfo_screenheight()
@@ -145,9 +154,4 @@ def main():
     root.mainloop()
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        import traceback
-        print("An error occurred:")
-        traceback.print_exc()
+    main()
