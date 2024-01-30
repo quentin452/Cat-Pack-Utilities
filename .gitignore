@@ -1,5 +1,7 @@
 app_logs.log
 app_logs_backup.zip
-.idea
+.idea/
 /logs/
-__pycache__
+__pycache__/
+/searchinglogs/
+*.log
