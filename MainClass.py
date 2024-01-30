@@ -7,6 +7,7 @@ import subprocess
 import os
 import sys
 import time
+import platform
 
 configure_logging()
 
@@ -19,20 +20,12 @@ resize_timer = None
 last_width = 0
 last_height = 0
 
-def get_screen_resolution():
-    user32 = ctypes.windll.user32
-    return user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
-
-def get_taskbar_height():
-    hwnd = ctypes.windll.user32.FindWindowW("Shell_TrayWnd", None)
-    rect = wintypes.RECT()
-    ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect))
-    return rect.bottom - rect.top
 
 def adjust_button_position(new_width, new_height):
     global button
     if button:
         button.place(x=(new_width - 200) / 2, y=(new_height - 100) / 2)
+
 
 def resize_background(event):
     global last_width, last_height
@@ -44,6 +37,7 @@ def resize_background(event):
         last_height = current_height
         resize_image(current_width, current_height)
         adjust_button_position(current_width, current_height)
+
 
 def resize_image(new_width, new_height):
     global background_photo, background_image, canvas
@@ -66,14 +60,27 @@ def resize_image(new_width, new_height):
     canvas.create_image(0, 0, anchor=tk.NW, image=background_photo, tags="bg_image")
 
 
-def adjust_button_position(new_width, new_height):
-    global button
-    if button:
-        button.place(x=(new_width - 200) / 2, y=(new_height - 100) / 2)
-
 def run_word_name_searching():
-    subprocess.Popen([sys.executable, "Catpackutilities/utilities/word_or_name_searching.py"], creationflags=subprocess.CREATE_NEW_CONSOLE)
+    script_path = "Catpackutilities/utilities/word_or_name_searching.py"
+
+    if platform.system() == 'Windows':
+        # For Windows, use 'start' to open a new terminal window
+        subprocess.Popen(["start", "cmd", "/k", sys.executable, script_path], shell=True)
+    elif platform.system() in ['Linux', 'Darwin']:
+        # For Unix-based systems (Linux, macOS), use different terminal emulators
+        terminal_emulator = None
+        if os.path.exists("/usr/bin/x-terminal-emulator"):
+            terminal_emulator = "x-terminal-emulator"
+        elif os.path.exists("/usr/bin/gnome-terminal"):
+            terminal_emulator = "gnome-terminal"
+        elif os.path.exists("/usr/bin/konsole"):  # Check for Konsole
+            terminal_emulator = "konsole"
+        else:
+            print("No supported terminal emulator found.")
+            return
+        subprocess.Popen([terminal_emulator, "-e", sys.executable, script_path])
     change_button_text()
+
 
 def change_button_text():
     global button
@@ -82,10 +89,12 @@ def change_button_text():
             button["text"] = "Clicked!"
             root.after(3000, revert_button_text)  # Change back after 3000 milliseconds (3 seconds)
 
+
 def revert_button_text():
     global button
     if button:
         button["text"] = "Word Name Searching"
+
 
 def create_buttons_on_canvas():
     global button, root
@@ -98,12 +107,13 @@ def create_buttons_on_canvas():
     button_texture = ImageTk.PhotoImage(button_texture)
 
     button = tk.Button(root, text="Word Name Searching", image=button_texture,
-                   compound=tk.CENTER, command=run_word_name_searching,
-                   borderwidth=0, relief="flat", highlightthickness=0,
-                   activebackground=root.cget("bg"), highlightbackground=root.cget("bg"),
-                   padx=0, pady=0)
+                       compound=tk.CENTER, command=run_word_name_searching,
+                       borderwidth=0, relief="flat", highlightthickness=0,
+                       activebackground=root.cget("bg"), highlightbackground=root.cget("bg"),
+                       padx=0, pady=0)
     button.image = button_texture
     button.place(x=(screen_width - 200) / 2, y=(screen_height - 100) / 2)
+
 
 def main():
     global root, canvas, background_photo, button, background_image, fps_label, last_width, last_height
@@ -118,7 +128,11 @@ def main():
     screen_width = root.winfo_screenwidth()
     screen_height = root.winfo_screenheight()
 
-    root.state('zoomed')
+    # Adaptation de root.attributes('-zoomed', True) pour fonctionner sur Linux et Windows
+    if platform.system() == 'Windows':
+        root.state('zoomed')  # Windows
+    elif platform.system() in ['Linux', 'Darwin']:
+        root.attributes('-zoomed', True)  # Linux et macOS
 
     canvas = tk.Canvas(root)
     canvas.pack(fill=tk.BOTH, expand=True)
@@ -133,17 +147,17 @@ def main():
     create_buttons_on_canvas()
     start_time = time.time()
     frame_count = 0
-    
+
     # Create and place a label to display FPS in top-left corner
     fps_label = tk.Label(root, text="", bg="black", fg="white")
     fps_label.place(x=10, y=10)
-    
+
     fps_counter = FPSCounter()
 
     def update_fps():
         fps_counter.update_fps(root)
         fps_counter.update_fps_label(root, fps_label)
-    
+
     root.after(8, update_fps)
 
     root.bind("<Configure>", resize_background)
@@ -152,6 +166,7 @@ def main():
     last_height = root.winfo_height()
 
     root.mainloop()
+
 
 if __name__ == "__main__":
     main()
