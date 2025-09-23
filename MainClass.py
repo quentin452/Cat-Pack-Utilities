@@ -14,17 +14,27 @@ configure_logging()
 root = None
 canvas = None
 background_photo = None
-button = None
+buttons = []
 background_image = None
 resize_timer = None
 last_width = 0
 last_height = 0
 
 
-def adjust_button_position(new_width, new_height):
-    global button
-    if button:
-        button.place(x=(new_width - 200) / 2, y=(new_height - 100) / 2)
+def adjust_buttons_position(new_width, new_height):
+    """Adjust the position of all buttons"""
+    global buttons
+    if buttons:
+        button_width = 200
+        button_height = 100
+        spacing = 20  # Spacing between buttons
+        
+        total_height = len(buttons) * button_height + (len(buttons) - 1) * spacing
+        start_y = (new_height - total_height) / 2
+        
+        for i, button in enumerate(buttons):
+            y_pos = start_y + i * (button_height + spacing)
+            button.place(x=(new_width - button_width) / 2, y=y_pos)
 
 
 def resize_background(event):
@@ -36,7 +46,7 @@ def resize_background(event):
         last_width = current_width
         last_height = current_height
         resize_image(current_width, current_height)
-        adjust_button_position(current_width, current_height)
+        adjust_buttons_position(current_width, current_height)
 
 
 def resize_image(new_width, new_height):
@@ -79,25 +89,47 @@ def run_word_name_searching():
             print("No supported terminal emulator found.")
             return
         subprocess.Popen([terminal_emulator, "-e", sys.executable, script_path])
-    change_button_text()
+    change_button_text("Word Name Searching")
 
 
-def change_button_text():
-    global button
-    if button:
-        if button["text"] == "Word Name Searching":
+def run_duplicate_finder():
+    script_path = "Catpackutilities/utilities/find_duplicate_mods.py"
+
+    if platform.system() == 'Windows':
+        # For Windows, use 'start' to open a new terminal window
+        subprocess.Popen(["start", "cmd", "/k", sys.executable, script_path], shell=True)
+    elif platform.system() in ['Linux', 'Darwin']:
+        # For Unix-based systems (Linux, macOS), use different terminal emulators
+        terminal_emulator = None
+        if os.path.exists("/usr/bin/x-terminal-emulator"):
+            terminal_emulator = "x-terminal-emulator"
+        elif os.path.exists("/usr/bin/gnome-terminal"):
+            terminal_emulator = "gnome-terminal"
+        elif os.path.exists("/usr/bin/konsole"):  # Check for Konsole
+            terminal_emulator = "konsole"
+        else:
+            print("No supported terminal emulator found.")
+            return
+        subprocess.Popen([terminal_emulator, "-e", sys.executable, script_path])
+    change_button_text("Duplicate Mods Finder")
+
+
+def change_button_text(button_name):
+    """Change le texte du bouton cliqué temporairement"""
+    global buttons
+    for button in buttons:
+        if button["text"] == button_name:
             button["text"] = "Clicked!"
-            root.after(3000, revert_button_text)  # Change back after 3000 milliseconds (3 seconds)
+            root.after(3000, lambda btn=button, original_text=button_name: revert_button_text(btn, original_text))
 
 
-def revert_button_text():
-    global button
-    if button:
-        button["text"] = "Word Name Searching"
+def revert_button_text(button, original_text):
+    """Remet le texte original du bouton"""
+    button["text"] = original_text
 
 
 def create_buttons_on_canvas():
-    global button, root
+    global buttons, root
 
     screen_width = root.winfo_screenwidth()
     screen_height = root.winfo_screenheight()
@@ -106,20 +138,44 @@ def create_buttons_on_canvas():
     button_texture = button_texture.resize((200, 100), Image.BILINEAR)
     button_texture = ImageTk.PhotoImage(button_texture)
 
-    button = tk.Button(root, text="Word Name Searching", image=button_texture,
-                       compound=tk.CENTER, command=run_word_name_searching,
-                       borderwidth=0, relief="flat", highlightthickness=0,
-                       activebackground=root.cget("bg"), highlightbackground=root.cget("bg"),
-                       padx=0, pady=0)
-    button.image = button_texture
-    button.place(x=(screen_width - 200) / 2, y=(screen_height - 100) / 2)
+    button_configs = [
+        {
+            "text": "Word Name Searching",
+            "command": run_word_name_searching
+        },
+        {
+            "text": "Duplicate Mods Finder", 
+            "command": run_duplicate_finder
+        }
+    ]
+
+    for i, config in enumerate(button_configs):
+        button = tk.Button(
+            root, 
+            text=config["text"], 
+            image=button_texture,
+            compound=tk.CENTER, 
+            command=config["command"],
+            borderwidth=0, 
+            relief="flat", 
+            highlightthickness=0,
+            activebackground=root.cget("bg"), 
+            highlightbackground=root.cget("bg"),
+            padx=0, 
+            pady=0,
+            font=font.Font(family="Arial", size=10, weight="bold")  
+        )
+        button.image = button_texture
+        buttons.append(button)
+
+    adjust_buttons_position(screen_width, screen_height)
 
 
 def main():
-    global root, canvas, background_photo, button, background_image, fps_label, last_width, last_height
+    global root, canvas, background_photo, buttons, background_image, fps_label, last_width, last_height
 
     root = tk.Tk()
-    root.title("Cat Pack Utilities V0.1")
+    root.title("Cat Pack Utilities V0.2") 
 
     desired_font = font.Font(family="Arial", size=12)
     for widget in [root] + root.winfo_children():
@@ -128,7 +184,6 @@ def main():
     screen_width = root.winfo_screenwidth()
     screen_height = root.winfo_screenheight()
 
-    # Adaptation de root.attributes('-zoomed', True) pour fonctionner sur Linux et Windows
     if platform.system() == 'Windows':
         root.state('zoomed')  # Windows
     elif platform.system() in ['Linux', 'Darwin']:
@@ -151,6 +206,9 @@ def main():
     # Create and place a label to display FPS in top-left corner
     fps_label = tk.Label(root, text="", bg="black", fg="white")
     fps_label.place(x=10, y=10)
+
+    version_label = tk.Label(root, text="v0.2 - Duplicate Finder Added", bg="black", fg="white")
+    version_label.place(x=screen_width - 200, y=screen_height - 30)
 
     fps_counter = FPSCounter()
 

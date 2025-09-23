@@ -6,3 +6,4 @@ __pycache__/
 /searchinglogs/
 *.log
 /Catpackutilities/utilities/searchinglogs
+/Catpackutilities/utilities/duplicate_reports
