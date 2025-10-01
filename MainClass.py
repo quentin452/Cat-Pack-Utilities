@@ -209,6 +209,53 @@ def run_memory_analyzer():
 
     change_button_text("Memory Analyzer")
 
+def run_suspicious_loops_detector():
+    """Lance le script de détection de boucles suspectes dans un terminal séparé"""
+    script_path = "Catpackutilities/utilities/suspicious_loops_detector.py"
+
+    if platform.system() == 'Windows':
+        # Pour Windows, ouvrir un cmd séparé
+        subprocess.Popen(["start", "cmd", "/k", sys.executable, script_path], shell=True)
+    elif platform.system() in ['Linux', 'Darwin']:
+        # Pour Linux/macOS, détecter un terminal disponible
+        terminal_emulator = None
+        if os.path.exists("/usr/bin/x-terminal-emulator"):
+            terminal_emulator = "x-terminal-emulator"
+        elif os.path.exists("/usr/bin/gnome-terminal"):
+            terminal_emulator = "gnome-terminal"
+        elif os.path.exists("/usr/bin/konsole"):
+            terminal_emulator = "konsole"
+        else:
+            print("No supported terminal emulator found.")
+            return
+        subprocess.Popen([terminal_emulator, "-e", sys.executable, script_path])
+
+    change_button_text("Suspicious Loops Detector")
+
+
+def run_memory_leak_detector():
+    """Lance le script de détection de fuites mémoire dans un terminal séparé"""
+    script_path = "Catpackutilities/utilities/memory_leak_detector.py"
+
+    if platform.system() == 'Windows':
+        # Pour Windows, ouvrir un cmd séparé
+        subprocess.Popen(["start", "cmd", "/k", sys.executable, script_path], shell=True)
+    elif platform.system() in ['Linux', 'Darwin']:
+        # Pour Linux/macOS, détecter un terminal disponible
+        terminal_emulator = None
+        if os.path.exists("/usr/bin/x-terminal-emulator"):
+            terminal_emulator = "x-terminal-emulator"
+        elif os.path.exists("/usr/bin/gnome-terminal"):
+            terminal_emulator = "gnome-terminal"
+        elif os.path.exists("/usr/bin/konsole"):
+            terminal_emulator = "konsole"
+        else:
+            print("No supported terminal emulator found.")
+            return
+        subprocess.Popen([terminal_emulator, "-e", sys.executable, script_path])
+
+    change_button_text("Memory Leak Detector")
+
 
 def change_button_text(button_name):
     """Change le texte du bouton cliqué temporairement"""
@@ -258,6 +305,14 @@ def create_buttons_on_canvas():
         {
             "text": "Memory Analyzer",
             "command": run_memory_analyzer
+        },
+        {
+            "text": "Suspicious Loops Detector",
+            "command": run_suspicious_loops_detector
+        },
+        {
+            "text": "Memory Leak Detector",
+            "command": run_memory_leak_detector
         }
     ]
 
@@ -287,7 +342,7 @@ def main():
     global root, canvas, background_photo, buttons, background_image, fps_label, last_width, last_height
 
     root = tk.Tk()
-    root.title("Cat Pack Utilities V0.2") 
+    root.title("Cat Pack Utilities V0.3") 
 
     desired_font = font.Font(family="Arial", size=12)
     for widget in [root] + root.winfo_children():
@@ -319,7 +374,7 @@ def main():
     fps_label = tk.Label(root, text="", bg="black", fg="white")
     fps_label.place(x=10, y=10)
 
-    version_label = tk.Label(root, text="v0.2 - Duplicate Finder Added", bg="black", fg="white")
+    version_label = tk.Label(root, text="v0.3 - Memory Leak Detector Added", bg="black", fg="white")
     version_label.place(x=screen_width - 200, y=screen_height - 30)
 
     fps_counter = FPSCounter()

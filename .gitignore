@@ -10,3 +10,5 @@ __pycache__/
 /Catpackutilities/utilities/excessive_calls_reports
 /Catpackutilities/utilities/security_reports
 /Catpackutilities/utilities/memory_reports
+/Catpackutilities/utilities/suspicious_loops_reports
+/Catpackutilities/utilities/memory_leak_reports
