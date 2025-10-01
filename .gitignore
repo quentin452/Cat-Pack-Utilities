@@ -7,3 +7,4 @@ __pycache__/
 *.log
 /Catpackutilities/utilities/searchinglogs
 /Catpackutilities/utilities/duplicate_reports
+/Catpackutilities/utilities/excessive_calls_reports
