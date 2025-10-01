@@ -8,3 +8,4 @@ __pycache__/
 /Catpackutilities/utilities/searchinglogs
 /Catpackutilities/utilities/duplicate_reports
 /Catpackutilities/utilities/excessive_calls_reports
+/Catpackutilities/utilities/security_reports

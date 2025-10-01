@@ -161,6 +161,31 @@ def run_excessive_calls_finder():
 
     change_button_text("Excessive Calls Finder")
 
+
+def run_security_detector():
+    """Lance le script de détection de vulnérabilités de sécurité dans un terminal séparé"""
+    script_path = "Catpackutilities/utilities/security_vulnerability_detector.py"
+
+    if platform.system() == 'Windows':
+        # Pour Windows, ouvrir un cmd séparé
+        subprocess.Popen(["start", "cmd", "/k", sys.executable, script_path], shell=True)
+    elif platform.system() in ['Linux', 'Darwin']:
+        # Pour Linux/macOS, détecter un terminal disponible
+        terminal_emulator = None
+        if os.path.exists("/usr/bin/x-terminal-emulator"):
+            terminal_emulator = "x-terminal-emulator"
+        elif os.path.exists("/usr/bin/gnome-terminal"):
+            terminal_emulator = "gnome-terminal"
+        elif os.path.exists("/usr/bin/konsole"):
+            terminal_emulator = "konsole"
+        else:
+            print("No supported terminal emulator found.")
+            return
+        subprocess.Popen([terminal_emulator, "-e", sys.executable, script_path])
+
+    change_button_text("Security Detector")
+
+
 def change_button_text(button_name):
     """Change le texte du bouton cliqué temporairement"""
     global buttons
@@ -201,6 +226,10 @@ def create_buttons_on_canvas():
         {
             "text": "Excessive Calls Finder",
             "command": run_excessive_calls_finder
+        },
+        {
+            "text": "Security Detector",
+            "command": run_security_detector
         }
     ]
 
