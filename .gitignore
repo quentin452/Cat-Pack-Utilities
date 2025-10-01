@@ -9,3 +9,4 @@ __pycache__/
 /Catpackutilities/utilities/duplicate_reports
 /Catpackutilities/utilities/excessive_calls_reports
 /Catpackutilities/utilities/security_reports
+/Catpackutilities/utilities/memory_reports
