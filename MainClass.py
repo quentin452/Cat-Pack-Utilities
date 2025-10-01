@@ -3,6 +3,7 @@ from tkinter import font
 from PIL import Image, ImageTk
 from Catpackutilities.logging_config import configure_logging
 from Catpackutilities.fps_counter import FPSCounter
+from Catpackutilities.utilities import count_classes_in_jars
 import subprocess
 import os
 import sys
@@ -113,6 +114,29 @@ def run_duplicate_finder():
         subprocess.Popen([terminal_emulator, "-e", sys.executable, script_path])
     change_button_text("Duplicate Mods Finder")
 
+def run_class_count():
+    """Lance le script de comptage de classes dans un terminal séparé"""
+    script_path = "Catpackutilities/utilities/count_classes_in_jars.py" 
+
+    if platform.system() == 'Windows':
+        # Pour Windows, ouvrir un cmd séparé
+        subprocess.Popen(["start", "cmd", "/k", sys.executable, script_path], shell=True)
+    elif platform.system() in ['Linux', 'Darwin']:
+        # Pour Linux/macOS, détecter un terminal disponible
+        terminal_emulator = None
+        if os.path.exists("/usr/bin/x-terminal-emulator"):
+            terminal_emulator = "x-terminal-emulator"
+        elif os.path.exists("/usr/bin/gnome-terminal"):
+            terminal_emulator = "gnome-terminal"
+        elif os.path.exists("/usr/bin/konsole"):
+            terminal_emulator = "konsole"
+        else:
+            print("No supported terminal emulator found.")
+            return
+        subprocess.Popen([terminal_emulator, "-e", sys.executable, script_path])
+
+    change_button_text("Count Classes in JARs")
+
 
 def change_button_text(button_name):
     """Change le texte du bouton cliqué temporairement"""
@@ -146,6 +170,10 @@ def create_buttons_on_canvas():
         {
             "text": "Duplicate Mods Finder", 
             "command": run_duplicate_finder
+        },
+        {
+            "text": "Count Classes in JARs",
+            "command": run_class_count
         }
     ]
 
