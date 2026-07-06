@@ -53,18 +53,19 @@ def api_get(path, token=None):
         return json.load(r)
 
 
-def verify(token, project):
-    """Pre-flight: project/slug exists + token valid, no upload."""
-    try:
-        p = api_get(f"/project/{project}")
-        print(f"[modrinth-verify] project '{project}' exists: {p.get('title')} (id {p.get('id')})")
-    except Exception as ex:
-        raise SystemExit(f"[modrinth-verify] project '{project}' not found (reserve the slug first?): {ex}")
+def verify(token, project=None):
+    """Pre-flight: token valid (+ project/slug exists if given), no upload."""
     try:
         u = api_get("/user", token)
-        print(f"[modrinth-verify] token OK (user {u.get('username')})")
+        print(f"[modrinth-verify] token OK (user {u.get('username')}, id {u.get('id')})")
     except Exception as ex:
-        raise SystemExit(f"[modrinth-verify] token invalid: {ex}")
+        raise SystemExit(f"[modrinth-verify] token invalid (need scope 'Read user data'): {ex}")
+    if project:
+        try:
+            p = api_get(f"/project/{project}")
+            print(f"[modrinth-verify] project '{project}' exists: {p.get('title')} (id {p.get('id')})")
+        except Exception as ex:
+            raise SystemExit(f"[modrinth-verify] project '{project}' not found (reserve the slug first?): {ex}")
 
 
 def encode_multipart(data_json, filename, file_bytes):
@@ -84,7 +85,7 @@ def encode_multipart(data_json, filename, file_bytes):
 
 def main():
     ap = argparse.ArgumentParser(description="Upload a jar version to Modrinth.")
-    ap.add_argument("--project", required=True, help="Modrinth project id or slug")
+    ap.add_argument("--project", help="Modrinth project id or slug (required for upload; optional for --verify)")
     ap.add_argument("--file", help="jar to upload (required unless --verify)")
     ap.add_argument("--version", help="version_number, e.g. V0.1.0 (required unless --verify)")
     ap.add_argument("--name", help="display name (default = version)")
@@ -103,8 +104,8 @@ def main():
         verify(token, args.project)
         return
 
-    if not args.file or not args.version:
-        sys.exit("--file and --version are required (or use --verify)")
+    if not (args.project and args.file and args.version):
+        sys.exit("--project, --file and --version are required for upload (or use --verify)")
     if not os.path.isfile(args.file):
         sys.exit(f"file not found: {args.file}")
 
