@@ -49,6 +49,17 @@ def git(repo, *args, check=True):
     return run(["git", "-C", repo, *args], check=check)[0]
 
 
+def build_run(cmd, cwd, env):
+    """Run a build streaming to a temp FILE, never a PIPE. A gradle daemon inherits gradlew's
+    stdout write-end; with a PIPE it keeps it open forever (no EOF) and subprocess.run's
+    communicate() hangs even after gradlew exits. A file has no EOF wait — run() returns as soon
+    as the direct child (gradlew) exits. Returns (returncode, tail_output)."""
+    with tempfile.TemporaryFile("w+") as f:
+        code = subprocess.run(cmd, cwd=cwd, env=env, stdout=f, stderr=subprocess.STDOUT).returncode
+        f.seek(0)
+        return code, f.read()
+
+
 def origin_slug(repo):
     """owner/repo of the origin remote — so gh targets the FORK, not its upstream parent."""
     url = git(repo, "remote", "get-url", "origin", check=False)
@@ -187,9 +198,11 @@ def release_one(mod, execute, skip_build):
         if jh:
             env["JAVA_HOME"] = jh
         log(f"build pass: {' '.join(mod['build']['cmd'])}" + (f"  (JAVA_HOME={jh})" if jh else ""))
-        _, code = run(mod["build"]["cmd"], cwd=repo, env=env, check=False, capture=True)
+        code, out = build_run(mod["build"]["cmd"], cwd=repo, env=env)
         if code != 0:
             log("BUILD FAILED -> rolling back tag, skipping release")
+            for ln in out.splitlines()[-8:]:
+                print(f"      {ln}")
             if execute and not existing:
                 git(repo, "tag", "-d", version, check=False)
             return False
