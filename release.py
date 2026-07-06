@@ -39,8 +39,12 @@ OAT_REPO = HOME / "Documents/GitHub/OptimizationsAndTweaks"
 
 JAVA = Path("/usr/lib/jvm/default-runtime/bin/java")  # java 21, what the pack runs on
 FORGE_PATCHES_JAR = "lwjgl3ify-2.1.15-forgePatches.jar"
+# Smoke heaps kept small so a server AND a client fit in RAM at once (both at 7-8G = OOM kill).
+# Enough to boot + idle / boot + join; not for heavy play. Tune via these two constants.
+SMOKE_SERVER_XMX = "4G"
+SMOKE_CLIENT_XMX = "4G"
 SERVER_JVM_FLAGS = [
-    "-Xmx7G", "-Xms500M", "-XX:+UseG1GC", "-XX:MaxGCPauseMillis=100",
+    f"-Xmx{SMOKE_SERVER_XMX}", "-Xms500M", "-XX:+UseG1GC", "-XX:MaxGCPauseMillis=100",
     "-XX:+ParallelRefProcEnabled", "-XX:+UseCompressedOops", "-XX:+TieredCompilation",
     "-XX:+OptimizeStringConcat", "-XX:SoftRefLRUPolicyMSPerMB=100",
 ]
@@ -134,6 +138,26 @@ def _set_prop(text, key, value):
 
 
 # --- Server boot + watch -----------------------------------------------------
+def _xmx_gb(x):
+    """'4G'/'8192M' -> gigabytes (float)."""
+    x = x.upper().rstrip("B")
+    if x.endswith("G"):
+        return float(x[:-1])
+    if x.endswith("M"):
+        return float(x[:-1]) / 1024
+    return float(x) / 1024 ** 3
+
+
+def _avail_ram_gb():
+    try:
+        for ln in open("/proc/meminfo"):
+            if ln.startswith("MemAvailable:"):
+                return int(ln.split()[1]) / 1024 / 1024
+    except OSError:
+        pass
+    return None
+
+
 def _build_client_argfile(host, port):
     """Copy the captured stage-2 client argfile: repoint --gameDir at the TEST instance and append
     auto-connect args. Returns the temp argfile path."""
@@ -142,8 +166,13 @@ def _build_client_argfile(host, port):
     lines = CLIENT_ARGFILE.read_text(encoding="utf-8", errors="replace").splitlines()
     out, i = [], 0
     while i < len(lines):
+        raw = lines[i].strip().strip('"')
+        if raw.startswith("-Xmx"):
+            out.append(f'"-Xmx{SMOKE_CLIENT_XMX}"')   # shrink client heap so it fits beside the server
+            i += 1
+            continue
         out.append(lines[i])
-        if lines[i].strip().strip('"') == "--gameDir" and i + 1 < len(lines):
+        if raw == "--gameDir" and i + 1 < len(lines):
             out.append(f'"{CLIENT_GAMEDIR}"')   # replace the (now-deleted) old gameDir line
             i += 2
             continue
@@ -171,6 +200,11 @@ def boot_client(server_log, host="localhost", port=25565, timeout=CLIENT_TIMEOUT
     if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
         log("WARNING: no DISPLAY/WAYLAND_DISPLAY set — the GUI client will fail. Run in a desktop "
             "session or under Xvfb.")
+    avail = _avail_ram_gb()
+    need = _xmx_gb(SMOKE_CLIENT_XMX) + 1.5   # heap + JVM/native/GL overhead
+    if avail is not None and avail < need:
+        log(f"WARNING: only {avail:.1f}G RAM free, client needs ~{need:.1f}G on top of the running "
+            f"server — likely OOM (exit -9). Close other apps (browser) or lower SMOKE_CLIENT_XMX.")
     argfile = _build_client_argfile(host, port)
     client_log = CLIENT_GAMEDIR / "logs" / "smoke-client-console.log"
     client_log.parent.mkdir(parents=True, exist_ok=True)
