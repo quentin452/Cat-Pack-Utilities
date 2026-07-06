@@ -27,6 +27,7 @@ import os
 import re
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 import zipfile
 
@@ -243,11 +244,16 @@ def main():
     if not args.skip_curse and bundles["curse"]:
         if key:
             print(f"\n== CurseForge ({len(bundles['curse'])} addons) ==")
-            report["curse"] = check_curse(bundles["curse"], key)
-            ups = [r for r in report["curse"] if r["updateAvailable"]]
-            print(f"  {len(ups)} updates disponibles ; plus vieux installés :")
-            for r in report["curse"][:args.top]:
-                print(f"  {(r['installedDate'] or '?')[:10]}  {r['name']}  ({r['installedFile']})")
+            try:
+                report["curse"] = check_curse(bundles["curse"], key)
+                ups = [r for r in report["curse"] if r["updateAvailable"]]
+                print(f"  {len(ups)} updates disponibles ; plus vieux installés :")
+                for r in report["curse"][:args.top]:
+                    print(f"  {(r['installedDate'] or '?')[:10]}  {r['name']}  ({r['installedFile']})")
+            except urllib.error.HTTPError as e:
+                print(f"  ERREUR API CurseForge: HTTP {e.code} — clé invalide/inactive ?"
+                      " Vérifier sur console.curseforge.com (la clé doit être active,"
+                      " copiée entière, sans guillemets).")
         else:
             print("\n== CurseForge: CF_API_KEY absent -> lookups sautés "
                   "(clé gratuite: console.curseforge.com) ==")
