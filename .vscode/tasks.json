@@ -1,0 +1,62 @@
+{
+  "version": "2.0.0",
+  "options": { "cwd": "${workspaceFolder}" },
+  "tasks": [
+    {
+      "label": "Pack: bundle check (fetchability)",
+      "type": "shell",
+      "command": "python3 bundle_check.py",
+      "detail": "Every bundle mod downloadable? (CF Approved+downloadUrl, URL 200). BUG-010.",
+      "problemMatcher": []
+    },
+    {
+      "label": "Pack: bundle check (orphans / completeness)",
+      "type": "shell",
+      "command": "python3 bundle_check.py --orphans \"${env:HOME}/Documents/curseforge/minecraft/Instances/Biggess Pack Cat Edition V1/mods\"",
+      "detail": "Jars in the instance that NO bundle delivers (would be missing for players).",
+      "problemMatcher": []
+    },
+    {
+      "label": "Release: dry-run all mods",
+      "type": "shell",
+      "command": "python3 release_mods.py",
+      "detail": "Stage 1 verify (tree/branch/targets) + Stage 2 build/plan. Publishes nothing.",
+      "problemMatcher": []
+    },
+    {
+      "label": "Release: EXECUTE all mods (publishes!)",
+      "type": "shell",
+      "command": "python3 release_mods.py --execute",
+      "detail": "REAL: tag + build + GitHub + CurseForge + Modrinth. Outward/public.",
+      "problemMatcher": []
+    },
+    {
+      "label": "Local: update instances (dry-run)",
+      "type": "shell",
+      "command": "python3 update_local.py",
+      "detail": "Preview swapping built personal jars into main/TEST/server.",
+      "problemMatcher": []
+    },
+    {
+      "label": "Local: update instances (apply)",
+      "type": "shell",
+      "command": "python3 update_local.py --apply",
+      "detail": "rm old + cp new jars into instances. Launch with -Dmoddirector.devMode=true after.",
+      "problemMatcher": []
+    },
+    {
+      "label": "Housekeep: archive resolved bugs (dry-run)",
+      "type": "shell",
+      "command": "python3 housekeep.py --archive-bugs",
+      "detail": "Preview moving resolved bugs from BUGS.md to BUGS-archive.md.",
+      "problemMatcher": []
+    },
+    {
+      "label": "Verify tokens (CF + Modrinth)",
+      "type": "shell",
+      "command": "python3 cf_upload.py --verify --project-id 855466 && python3 modrinth_upload.py --verify",
+      "detail": "Check the upload tokens are valid before a release.",
+      "problemMatcher": []
+    }
+  ]
+}
