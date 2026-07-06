@@ -22,9 +22,11 @@ Usage:
 
 import argparse
 import concurrent.futures
+import glob
 import json
 import os
 import sys
+import urllib.parse
 import urllib.request
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -146,11 +148,63 @@ def check_urls(entries):
     return problems
 
 
+# --- Orphans (a jar with no distribution source) ------------------------------
+# Bootstrapper: shipped to the client via the CF manifest and directly to the server, never a
+# bundle (it can't download itself). Any other jar not in a bundle would be missing for players.
+ORPHAN_WHITELIST = ("mod-director-launchwrapper",)
+
+
+def collect_expected(directory):
+    """All filenames a bundle promises to deliver (curse/modrinth fileName, url basename)."""
+    exp = set()
+    for e in read_bundle(directory, "curse.bundle.json", "curse"):
+        if e.get("fileName"):
+            exp.add(e["fileName"].lower())
+    for e in read_bundle(directory, "modrinth.bundle.json", "modrinth"):
+        if e.get("fileName"):
+            exp.add(e["fileName"].lower())
+    for e in read_bundle(directory, "url.bundle.json", "url"):
+        u = e.get("url")
+        if u:
+            exp.add(os.path.basename(urllib.parse.urlparse(u).path).lower())
+    return exp
+
+
+def check_orphans(mods_dir, expected):
+    """Jars present in mods_dir that no bundle delivers (and aren't the whitelisted bootstrapper)."""
+    orphans = []
+    for p in sorted(glob.glob(os.path.join(mods_dir, "*.jar"))):
+        name = os.path.basename(p)
+        low = name.lower()
+        if low in expected or any(w in low for w in ORPHAN_WHITELIST):
+            continue
+        orphans.append(name)
+    return orphans
+
+
 def main():
     ap = argparse.ArgumentParser(description="Validate modpack bundles before release.")
     ap.add_argument("--dir", default=DEFAULT_DIR, help="config/mod-director directory")
     ap.add_argument("--urls-only", action="store_true", help="skip CurseForge checks")
+    ap.add_argument("--orphans", metavar="MODS_DIR",
+                    help="instead: list jars in MODS_DIR that no bundle delivers (would be missing for players)")
     args = ap.parse_args()
+
+    if args.orphans:
+        if not os.path.isdir(args.orphans):
+            sys.exit(f"mods dir not found: {args.orphans}")
+        expected = collect_expected(args.dir)
+        orphans = check_orphans(args.orphans, expected)
+        jars = len(glob.glob(os.path.join(args.orphans, "*.jar")))
+        print(f"[orphan-check] {jars} jars in {args.orphans} vs {len(expected)} bundle-delivered filenames")
+        print("=" * 60)
+        if orphans:
+            print(f"FAIL — {len(orphans)} orphan jar(s) with no bundle source (players won't get them):")
+            for o in orphans:
+                print(f"  ✗ {o}")
+            sys.exit(1)
+        print("PASS — every jar is delivered by a bundle (or is the bootstrapper).")
+        return
 
     if not os.path.isdir(args.dir):
         sys.exit(f"bundle dir not found: {args.dir}")
