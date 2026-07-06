@@ -164,9 +164,12 @@ def collect_expected(directory):
         if e.get("fileName"):
             exp.add(e["fileName"].lower())
     for e in read_bundle(directory, "url.bundle.json", "url"):
-        u = e.get("url")
-        if u:
-            exp.add(os.path.basename(urllib.parse.urlparse(u).path).lower())
+        # mod-director saves the download as "fileName" if given (often != the URL basename).
+        fn = e.get("fileName")
+        if fn:
+            exp.add(fn.lower())
+        elif e.get("url"):
+            exp.add(os.path.basename(urllib.parse.urlparse(e["url"]).path).lower())
     return exp
 
 
