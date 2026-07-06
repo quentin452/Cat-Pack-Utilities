@@ -3,7 +3,7 @@
 # then ALWAYS terminate the game. Guards against double instances.
 # Usage: pack_boot_profile.sh [--jfr] [timeout_seconds=600]
 set -u
-INST="/home/iamacat/Documents/curseforge/minecraft/Instances/Biggess Pack Cat Edition V1"
+INST="/home/iamacat/Documents/curseforge/minecraft/Instances/Biggess Pack Cat Edition V1 TEST"
 ARGFILE="/home/iamacat/Documents/GitHub/Mod-Sandbox/docs/captures/client-relaunch.arg"
 LOG="$INST/logs/fml-client-latest.log"
 JAVA=/usr/lib/jvm/default-runtime/bin/java

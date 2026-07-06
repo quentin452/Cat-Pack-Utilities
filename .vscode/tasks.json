@@ -12,7 +12,7 @@
     {
       "label": "Pack: bundle check (orphans / completeness)",
       "type": "shell",
-      "command": "python3 bundle_check.py --orphans \"${env:HOME}/Documents/curseforge/minecraft/Instances/Biggess Pack Cat Edition V1/mods\"",
+      "command": "python3 bundle_check.py --orphans \"${env:HOME}/Documents/curseforge/minecraft/Instances/Biggess Pack Cat Edition V1 TEST/mods\"",
       "detail": "Jars in the instance that NO bundle delivers (would be missing for players).",
       "problemMatcher": []
     },

@@ -26,7 +26,7 @@ HOME = os.path.expanduser("~")
 MANIFEST = os.path.join(HOME, "Documents/GitHub/Mod-Sandbox/memory/release-manifest.json")
 
 INSTANCES = {
-    "main":   os.path.join(HOME, "Documents/curseforge/minecraft/Instances/Biggess Pack Cat Edition V1/mods"),
+    # The non-TEST "Biggess Pack Cat Edition V1" instance was deleted (it was a 2nd test instance).
     "TEST":   os.path.join(HOME, "Documents/curseforge/minecraft/Instances/Biggess Pack Cat Edition V1 TEST/mods"),
     "server": os.path.join(HOME, "Bureau/SERVERS/Biggess Pack Cat Edition V1 Server/mods"),
 }
