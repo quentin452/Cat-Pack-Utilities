@@ -30,7 +30,9 @@ import sys
 import tempfile
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-MANIFEST = os.path.join(SCRIPT_DIR, "release_manifest.json")
+# The manifest (release plan) lives in the Mod-Sandbox hub (planning data, versioned +
+# auto-pushed, next to pipeline-mods.md). Override with --manifest.
+MANIFEST = os.path.expanduser("~/Documents/GitHub/Mod-Sandbox/memory/release-manifest.json")
 
 
 def run(cmd, cwd=None, env=None, check=True, capture=True):
