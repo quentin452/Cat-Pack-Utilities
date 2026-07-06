@@ -1,0 +1,41 @@
+{
+  "_comment": "Pending mod releases. Bulk runner = release_mods.py. Version = git tag (see docs/14). Add/remove entries as mods ship. build.java_home null = system default (Java 21).",
+  "mods": [
+    {
+      "name": "OptimizationsAndTweaks",
+      "repo": "~/Documents/GitHub/OptimizationsAndTweaks",
+      "branch": "1.7.10",
+      "version": "V1.17.2",
+      "gh_title": "1.7.10 V1.17.2 PATHFINDING THREAD-SAFETY FIX",
+      "jar_glob": "build/libs/optimizationsandtweaks-*.jar",
+      "jar_exclude": ["-dev", "-sources"],
+      "build": { "cmd": ["./gradlew", "build"], "java_home": null },
+      "curseforge": { "project_id": 855466, "game_version": "1.7.10" },
+      "modrinth": null
+    },
+    {
+      "name": "ImmersiveEngineering",
+      "repo": "~/Documents/GitHub/ImmersiveEngineering",
+      "branch": "1.7.10",
+      "version": "0.7.11-fork4",
+      "gh_title": "1.7.10 V0.7.11-fork4",
+      "jar_glob": "build/libs/ImmersiveEngineering-*.jar",
+      "jar_exclude": ["-dev", "-sources", "-api", "-deobf"],
+      "build": { "cmd": ["./gradlew", "build"], "java_home": null },
+      "curseforge": null,
+      "modrinth": null
+    },
+    {
+      "name": "FileDirector",
+      "repo": "~/Documents/GitHub/FileDirector",
+      "branch": "feat/dev-mode-and-mod-names",
+      "version": "1.9.1-fork7",
+      "gh_title": "1.7.10 V1.9.1-fork7",
+      "jar_glob": "mod-director-launchwrapper/build/libs/mod-director-launchwrapper-*-all.jar",
+      "jar_exclude": [],
+      "build": { "cmd": ["./gradlew", "build", "--no-daemon"], "java_home": "/usr/lib/jvm/java-8-openjdk" },
+      "curseforge": null,
+      "modrinth": null
+    }
+  ]
+}

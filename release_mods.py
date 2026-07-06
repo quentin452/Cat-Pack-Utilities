@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+"""
+release_mods.py — bulk release the pending mods from release_manifest.json.
+
+Per mod, with SAFETY GATES first (nothing is released if a gate fails):
+  1. clean working tree      (never release with uncommitted changes)
+  2. on the expected branch
+  3. PUSH pass               (push any unpushed commits — a release must reference code
+                             that is on origin, not only local)
+  4. tag the version         (git tag <version>, local)
+  5. COMPILE/BUILD pass       (build green + jar produced; on failure the tag is rolled back)
+Then release: push tag -> GitHub release (gh) -> CurseForge (cf_upload.py) -> Modrinth
+(modrinth_upload.py), each only if configured. Changelog = git commits since the previous tag.
+
+DRY-RUN BY DEFAULT. Pass --execute to actually tag/push/publish.
+
+Usage:
+  release_mods.py                     # dry-run all mods (gates + plan, no publish)
+  release_mods.py --only OptimizationsAndTweaks
+  release_mods.py --execute           # for real
+  release_mods.py --execute --skip-build   # trust an existing build (not recommended)
+"""
+
+import argparse
+import glob
+import json
+import os
+import subprocess
+import sys
+import tempfile
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+MANIFEST = os.path.join(SCRIPT_DIR, "release_manifest.json")
+
+
+def run(cmd, cwd=None, env=None, check=True, capture=True):
+    r = subprocess.run(cmd, cwd=cwd, env=env, text=True,
+                       stdout=subprocess.PIPE if capture else None,
+                       stderr=subprocess.STDOUT if capture else None)
+    if check and r.returncode != 0:
+        raise RuntimeError(f"cmd failed ({r.returncode}): {' '.join(cmd)}\n{r.stdout or ''}")
+    return (r.stdout or "").strip(), r.returncode
+
+
+def git(repo, *args, check=True):
+    return run(["git", "-C", repo, *args], check=check)[0]
+
+
+def find_jar(repo, mod):
+    cands = [p for p in glob.glob(os.path.join(repo, mod["jar_glob"]))
+             if not any(x in os.path.basename(p) for x in mod.get("jar_exclude", []))]
+    if not cands:
+        raise RuntimeError(f"no jar matched {mod['jar_glob']} (excludes {mod.get('jar_exclude')})")
+    return max(cands, key=os.path.getmtime)
+
+
+def release_one(mod, execute, skip_build):
+    name = mod["name"]
+    repo = os.path.expanduser(mod["repo"])
+    version = mod["version"]
+    log = lambda m: print(f"  [{name}] {m}")
+    print(f"=== {name}  ->  {version} ===")
+
+    if not os.path.isdir(os.path.join(repo, ".git")):
+        log(f"SKIP: not a git repo: {repo}")
+        return False
+
+    # Gate 1: clean tree
+    if git(repo, "status", "--porcelain"):
+        log("SKIP: working tree not clean (commit/stash first)")
+        return False
+
+    # Gate 2: expected branch
+    cur = git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+    if cur != mod["branch"]:
+        log(f"SKIP: on branch '{cur}', expected '{mod['branch']}'")
+        return False
+
+    # Gate 3: push pass
+    up, code = run(["git", "-C", repo, "rev-parse", "--abbrev-ref", "@{u}"], check=False)
+    if code != 0:
+        log("SKIP: no upstream configured (push -u once first)")
+        return False
+    ahead = git(repo, "rev-list", "--count", "@{u}..HEAD")
+    if ahead != "0":
+        if execute:
+            log(f"push pass: {ahead} unpushed commit(s) -> git push")
+            git(repo, "push")
+        else:
+            log(f"[dry-run] would push {ahead} unpushed commit(s)")
+
+    # Gate 4: tag (local)
+    existing = git(repo, "tag", "-l", version)
+    prev_tag = git(repo, "describe", "--tags", "--abbrev=0", check=False)
+    if existing:
+        log(f"tag {version} already exists (re-using)")
+    else:
+        if execute:
+            git(repo, "tag", version)
+            log(f"tagged {version}")
+        else:
+            log(f"[dry-run] would tag {version}")
+
+    # Gate 5: compile/build pass
+    if skip_build:
+        log("build skipped (--skip-build)")
+    else:
+        env = dict(os.environ)
+        jh = mod["build"].get("java_home")
+        if jh:
+            env["JAVA_HOME"] = jh
+        log(f"build pass: {' '.join(mod['build']['cmd'])}" + (f"  (JAVA_HOME={jh})" if jh else ""))
+        _, code = run(mod["build"]["cmd"], cwd=repo, env=env, check=False, capture=True)
+        if code != 0:
+            log("BUILD FAILED -> rolling back tag, skipping release")
+            if execute and not existing:
+                git(repo, "tag", "-d", version, check=False)
+            return False
+        log("build OK")
+
+    # Locate jar (best-effort in dry-run: build may not have run with a clean tag name)
+    try:
+        jar = find_jar(repo, mod)
+        log(f"jar: {os.path.basename(jar)}")
+    except RuntimeError as e:
+        log(f"{'SKIP' if execute else '[dry-run] note'}: {e}")
+        if execute:
+            return False
+        jar = None
+
+    # Changelog = commits since previous tag
+    rng = f"{prev_tag}..{version}" if prev_tag and existing else (f"{prev_tag}..HEAD" if prev_tag else "HEAD")
+    changelog = git(repo, "log", "--reverse", "--format=%s", rng, check=False)
+    log(f"changelog ({rng}): {len(changelog.splitlines())} commit(s)")
+    for line in changelog.splitlines()[:12]:
+        print(f"      - {line}")
+
+    if not execute:
+        tgt = ["GitHub"]
+        if mod.get("curseforge"):
+            tgt.append(f"CF:{mod['curseforge']['project_id']}")
+        if mod.get("modrinth"):
+            tgt.append(f"Modrinth:{mod['modrinth']['project']}")
+        log(f"[dry-run] would publish to: {', '.join(tgt)}")
+        return True
+
+    # --- real publish ---
+    git(repo, "push", "origin", version)  # push the tag
+    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
+        f.write(changelog + "\n")
+        notes = f.name
+    run(["gh", "release", "create", version, "-t", mod["gh_title"], "-F", notes, jar], cwd=repo)
+    log(f"GitHub release {version} created")
+
+    if mod.get("curseforge"):
+        cf = mod["curseforge"]
+        run(["python3", os.path.join(SCRIPT_DIR, "cf_upload.py"),
+             "--project-id", str(cf["project_id"]), "--file", jar,
+             "--display-name", version, "--game-version", cf.get("game_version", "1.7.10"),
+             "--release-type", "release", "--changelog-file", notes], capture=False)
+        log("CurseForge upload done")
+
+    if mod.get("modrinth"):
+        mr = mod["modrinth"]
+        run(["python3", os.path.join(SCRIPT_DIR, "modrinth_upload.py"),
+             "--project", mr["project"], "--file", jar, "--version", version,
+             "--game-version", mr.get("game_version", "1.7.10"),
+             "--release-type", "release", "--changelog-file", notes], capture=False)
+        log("Modrinth upload done")
+
+    os.unlink(notes)
+    return True
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Bulk-release the pending mods.")
+    ap.add_argument("--manifest", default=MANIFEST)
+    ap.add_argument("--only", help="release only this mod name")
+    ap.add_argument("--execute", action="store_true", help="actually tag/push/publish (default: dry-run)")
+    ap.add_argument("--skip-build", action="store_true", help="trust an existing build")
+    args = ap.parse_args()
+
+    mods = json.load(open(args.manifest))["mods"]
+    if args.only:
+        mods = [m for m in mods if m["name"] == args.only]
+        if not mods:
+            sys.exit(f"no mod named {args.only!r} in manifest")
+
+    mode = "EXECUTE" if args.execute else "DRY-RUN"
+    print(f"===== release_mods [{mode}] — {len(mods)} mod(s) =====\n")
+    ok = 0
+    for m in mods:
+        try:
+            if release_one(m, args.execute, args.skip_build):
+                ok += 1
+        except Exception as e:
+            print(f"  [{m['name']}] ERROR: {e}")
+        print()
+    print(f"===== {ok}/{len(mods)} {'released' if args.execute else 'ready'} =====")
+
+
+if __name__ == "__main__":
+    main()
