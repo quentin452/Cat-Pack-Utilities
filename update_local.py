@@ -39,10 +39,13 @@ EXTRA_MODS = [
      "instances": ["TEST"]},
 ]
 
-# The mod-director bootstrapper is special: it lives as "!mod-director-launchwrapper-*.jar" (the "!"
-# forces it to load first) and is updated via the pack repo + CF project 1359998, not a naive local
-# swap. Skip it here so we don't drop a duplicate without the "!".
-SKIP_LOCAL = {"FileDirector"}
+# The mod-director bootstrapper lives as "!mod-director-launchwrapper-*.jar" (the "!" forces it to
+# load first). Local swap works with the "!"-aware prefix/name below (players get it via the pack
+# repo + CF project 1359998, separately). Add names here for any other special-named local mod.
+LOCAL_OVERRIDES = {
+    "FileDirector": {"prefix": "!mod-director-launchwrapper-", "name_prefix": "!"},
+}
+SKIP_LOCAL = set()
 
 
 def newest_jar(repo, mod):
@@ -57,8 +60,9 @@ def prefix_of(mod):
 
 
 def swap(mod, jar, mods_dir, apply):
-    pfx = prefix_of(mod)
-    dest = os.path.join(mods_dir, os.path.basename(jar))
+    ov = LOCAL_OVERRIDES.get(mod["name"], {})
+    pfx = ov.get("prefix", prefix_of(mod)).lower()
+    dest = os.path.join(mods_dir, ov.get("name_prefix", "") + os.path.basename(jar))
     removed = []
     for p in glob.glob(os.path.join(mods_dir, "*.jar")):
         name = os.path.basename(p)
@@ -68,7 +72,7 @@ def swap(mod, jar, mods_dir, apply):
                 os.remove(p)
     action = "cp" if not os.path.exists(dest) else "overwrite"
     print(f"    {mods_dir.rsplit('/', 2)[-2]}: -{len(removed)} old ({', '.join(removed) or 'none'}) "
-          f"{action} {os.path.basename(jar)}")
+          f"{action} {os.path.basename(dest)}")
     if apply:
         shutil.copy2(jar, dest)
 
