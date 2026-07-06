@@ -46,7 +46,9 @@ SERVER_JVM_FLAGS = [
 ]
 
 # OaT jar swap: remove this manually-placed jar, drop our fresh build in its place.
-OAT_REMOVE_GLOB = "optimizationsandtweaks-V1.16.4.jar"
+# Remove ANY existing OaT jar (the server src may carry any version — update_local swaps it too),
+# not one hardcoded version, else two OaT jars coexist -> DuplicateModsFoundException.
+OAT_REMOVE_GLOB = "optimizationsandtweaks-*.jar"
 OAT_DEST_NAME = "optimizationsandtweaks-smoke.jar"
 
 SERVER_READY_MARK = "Done ("           # vanilla/forge "Done (X.XXXs)! For help..."
@@ -126,7 +128,7 @@ def _set_prop(text, key, value):
 
 
 # --- Server boot + watch -----------------------------------------------------
-def boot_server(timeout=600, soak=180):
+def boot_server(timeout=600, soak=180, extra_flags=None):
     """Boot the clone headless, wait for readiness, soak, then stop. Returns a result dict."""
     # Capture the server console to our own file and watch THAT (the log4j console
     # appender prints everything: mod loading, "Done (", our AsyncPathfinding lines).
@@ -137,7 +139,7 @@ def boot_server(timeout=600, soak=180):
     crash_dir = SMOKE_CLONE / "crash-reports"
     crashes_before = set(p.name for p in crash_dir.glob("*.txt")) if crash_dir.exists() else set()
 
-    cmd = [str(JAVA), *SERVER_JVM_FLAGS, "@java9args.txt", "-jar", FORGE_PATCHES_JAR, "nogui"]
+    cmd = [str(JAVA), *SERVER_JVM_FLAGS, *(extra_flags or []), "@java9args.txt", "-jar", FORGE_PATCHES_JAR, "nogui"]
     log(f"booting server: {' '.join(cmd)}")
     console = open(server_log, "w", encoding="utf-8", errors="replace")
     proc = subprocess.Popen(
@@ -266,7 +268,8 @@ def cmd_smoke(args):
     clone_server(fresh=not args.no_clone)
     swap_oat(jar)
     configure_server(online_mode=False, fresh_world=not args.keep_world)
-    result = boot_server(timeout=args.timeout, soak=args.soak)
+    result = boot_server(timeout=args.timeout, soak=args.soak,
+                         extra_flags=["-Dmoddirector.devMode=true"] if args.devmode else None)
     ok = report_smoke(result)
     # TODO client auto-join phase (needs server kept running) — see docs/10.
     if not args.keep:
@@ -286,6 +289,9 @@ def main():
     sp.add_argument("--no-clone", action="store_true", help="reuse existing clone (skip cp -al)")
     sp.add_argument("--keep-world", action="store_true", help="keep existing world (no fresh gen)")
     sp.add_argument("--keep", action="store_true", help="do not delete the clone afterwards")
+    sp.add_argument("--devmode", action="store_true",
+                    help="boot with -Dmoddirector.devMode=true (FileDirector smoke: exercises the "
+                         "keep-existing-variant path + the dir-listing cache)")
     sp.set_defaults(func=cmd_smoke)
 
     args = ap.parse_args()
