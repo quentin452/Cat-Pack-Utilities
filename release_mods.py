@@ -46,6 +46,21 @@ def git(repo, *args, check=True):
     return run(["git", "-C", repo, *args], check=check)[0]
 
 
+def dirty_paths(repo, ignore=()):
+    """Porcelain paths that are dirty, excluding build-touched noise listed in ignore.
+    Parses the path as the last whitespace field (robust to run()'s output .strip();
+    assumes mod repos have no spaces in tracked paths)."""
+    out = []
+    for line in git(repo, "status", "--porcelain").splitlines():
+        parts = line.split()
+        if not parts:
+            continue
+        path = parts[-1].strip('"')
+        if os.path.basename(path) not in ignore and path not in ignore:
+            out.append(path)
+    return out
+
+
 def verify_targets(mod):
     """Stage-1: confirm the configured upload destinations are valid before any build/upload.
     Returns list of failure strings (empty = ok)."""
@@ -72,8 +87,9 @@ def stage1_checks(mod):
     msgs = []
     if not os.path.isdir(os.path.join(repo, ".git")):
         return False, [f"not a git repo: {repo}"]
-    if git(repo, "status", "--porcelain"):
-        return False, ["working tree not clean"]
+    dirty = dirty_paths(repo, mod.get("ignore_dirty", []))
+    if dirty:
+        return False, [f"working tree not clean: {', '.join(dirty[:5])}"]
     cur = git(repo, "rev-parse", "--abbrev-ref", "HEAD")
     if cur != mod["branch"]:
         return False, [f"on branch '{cur}', expected '{mod['branch']}'"]
@@ -110,9 +126,10 @@ def release_one(mod, execute, skip_build):
         log(f"SKIP: not a git repo: {repo}")
         return False
 
-    # Gate 1: clean tree
-    if git(repo, "status", "--porcelain"):
-        log("SKIP: working tree not clean (commit/stash first)")
+    # Gate 1: clean tree (ignoring build-touched noise)
+    dirty = dirty_paths(repo, mod.get("ignore_dirty", []))
+    if dirty:
+        log(f"SKIP: working tree not clean: {', '.join(dirty[:5])}")
         return False
 
     # Gate 2: expected branch

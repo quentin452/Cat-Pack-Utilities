@@ -21,6 +21,7 @@
       "gh_title": "1.7.10 V0.7.11-fork4",
       "jar_glob": "build/libs/ImmersiveEngineering-*.jar",
       "jar_exclude": ["-dev", "-sources", "-api", "-deobf"],
+      "ignore_dirty": ["changelog.md", "contributorRevolvers.json"],
       "build": { "cmd": ["./gradlew", "build"], "java_home": null },
       "curseforge": null,
       "modrinth": null
