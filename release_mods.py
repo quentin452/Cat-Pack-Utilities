@@ -25,6 +25,7 @@ import argparse
 import glob
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -46,6 +47,13 @@ def run(cmd, cwd=None, env=None, check=True, capture=True):
 
 def git(repo, *args, check=True):
     return run(["git", "-C", repo, *args], check=check)[0]
+
+
+def origin_slug(repo):
+    """owner/repo of the origin remote — so gh targets the FORK, not its upstream parent."""
+    url = git(repo, "remote", "get-url", "origin", check=False)
+    m = re.search(r"github\.com[:/]([^/]+/[^/.]+?)(?:\.git)?$", url)
+    return m.group(1) if m else None
 
 
 def dirty_paths(repo, ignore=()):
@@ -155,7 +163,12 @@ def release_one(mod, execute, skip_build):
 
     # Gate 4: tag (local)
     existing = git(repo, "tag", "-l", version)
-    prev_tag = git(repo, "describe", "--tags", "--abbrev=0", check=False)
+    # Previous release tag = latest tag that is NOT this version. If the version tag already
+    # exists (re-run), look before its commit; otherwise the current latest tag (before tagging).
+    if existing:
+        prev_tag = git(repo, "describe", "--tags", "--abbrev=0", f"{version}^", check=False)
+    else:
+        prev_tag = git(repo, "describe", "--tags", "--abbrev=0", check=False)
     if existing:
         log(f"tag {version} already exists (re-using)")
     else:
@@ -193,7 +206,7 @@ def release_one(mod, execute, skip_build):
         jar = None
 
     # Changelog = commits since previous tag
-    rng = f"{prev_tag}..{version}" if prev_tag and existing else (f"{prev_tag}..HEAD" if prev_tag else "HEAD")
+    rng = f"{prev_tag}..HEAD" if prev_tag else "HEAD"
     changelog = git(repo, "log", "--reverse", "--format=%s", rng, check=False)
     log(f"changelog ({rng}): {len(changelog.splitlines())} commit(s)")
     for line in changelog.splitlines()[:12]:
@@ -213,8 +226,12 @@ def release_one(mod, execute, skip_build):
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
         f.write(changelog + "\n")
         notes = f.name
-    run(["gh", "release", "create", version, "-t", mod["gh_title"], "-F", notes, jar], cwd=repo)
-    log(f"GitHub release {version} created")
+    gh_cmd = ["gh", "release", "create", version, "-t", mod["gh_title"], "-F", notes, jar]
+    slug = origin_slug(repo)
+    if slug:
+        gh_cmd += ["-R", slug]  # target the fork, not gh's default (the upstream parent)
+    run(gh_cmd, cwd=repo)
+    log(f"GitHub release {version} created ({slug or 'default repo'})")
 
     if mod.get("curseforge"):
         cf = mod["curseforge"]
@@ -280,6 +297,8 @@ def main():
             print(f"  [{m['name']}] ERROR: {e}")
         print()
     print(f"===== {done}/{len(ready)} {'released' if args.execute else 'ready'} =====")
+    if done < len(ready) or len(ready) < len(mods):
+        sys.exit(1)  # surface partial failure with a non-zero exit code
 
 
 if __name__ == "__main__":
