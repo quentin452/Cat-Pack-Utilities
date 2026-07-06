@@ -53,6 +53,12 @@ OAT_DEST_NAME = "optimizationsandtweaks-smoke.jar"
 
 SERVER_READY_MARK = "Done ("           # vanilla/forge "Done (X.XXXs)! For help..."
 ASYNC_PF_MARK = "[AsyncPathfinding]"    # our init/stats log lines
+# Client auto-join (V1): the client GUI boots ~900 mods then connects to the kept-alive smoke
+# server. Join is confirmed via the SERVER log (vanilla FML "joined the game") — reliable and
+# already captured, so no fragile client-log marker. Needs a DISPLAY (desktop session or Xvfb).
+CLIENT_GAMEDIR = HOME / "Documents/curseforge/minecraft/Instances/Biggess Pack Cat Edition V1 TEST"
+JOIN_MARK = "joined the game"
+CLIENT_TIMEOUT = 480
 
 
 def log(msg):
@@ -128,7 +134,77 @@ def _set_prop(text, key, value):
 
 
 # --- Server boot + watch -----------------------------------------------------
-def boot_server(timeout=600, soak=180, extra_flags=None):
+def _build_client_argfile(host, port):
+    """Copy the captured stage-2 client argfile: repoint --gameDir at the TEST instance and append
+    auto-connect args. Returns the temp argfile path."""
+    if not CLIENT_ARGFILE.exists():
+        die(f"client argfile not captured: {CLIENT_ARGFILE} (recapture it — see docs/captures)")
+    lines = CLIENT_ARGFILE.read_text(encoding="utf-8", errors="replace").splitlines()
+    out, i = [], 0
+    while i < len(lines):
+        out.append(lines[i])
+        if lines[i].strip().strip('"') == "--gameDir" and i + 1 < len(lines):
+            out.append(f'"{CLIENT_GAMEDIR}"')   # replace the (now-deleted) old gameDir line
+            i += 2
+            continue
+        i += 1
+    out += ['"--server"', f'"{host}"', '"--port"', f'"{port}"']
+    tmp = SMOKE_CLONE / "smoke-client.arg"
+    tmp.write_text("\n".join(out) + "\n", encoding="utf-8")
+    return tmp
+
+
+def _stop_client(proc):
+    if proc.poll() is not None:
+        return
+    log("stopping client...")
+    proc.terminate()
+    try:
+        proc.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+
+
+def boot_client(server_log, host="localhost", port=25565, timeout=CLIENT_TIMEOUT):
+    """Boot the GUI client, auto-connect to the kept-alive server, confirm join via the SERVER log."""
+    res = {"joined": False, "client_exit": None, "reason": None}
+    if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        log("WARNING: no DISPLAY/WAYLAND_DISPLAY set — the GUI client will fail. Run in a desktop "
+            "session or under Xvfb.")
+    argfile = _build_client_argfile(host, port)
+    client_log = CLIENT_GAMEDIR / "logs" / "smoke-client-console.log"
+    client_log.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [str(JAVA), f"@{argfile}"]
+    log(f"booting client (auto-join {host}:{port}) — gameDir {CLIENT_GAMEDIR.name}")
+    console = open(client_log, "w", encoding="utf-8", errors="replace")
+    proc = subprocess.Popen(cmd, cwd=str(CLIENT_GAMEDIR), stdin=subprocess.DEVNULL,
+                            stdout=console, stderr=subprocess.STDOUT)
+    start = time.time()
+    while time.time() - start < timeout:
+        if proc.poll() is not None:
+            res["client_exit"] = proc.returncode
+            res["reason"] = f"client exited early (code {proc.returncode}) before join — see {client_log}"
+            log(res["reason"])
+            break
+        content = server_log.read_text(encoding="utf-8", errors="replace") if server_log.exists() else ""
+        if JOIN_MARK in content:
+            res["joined"] = True
+            res["reason"] = f"player joined (server saw '{JOIN_MARK}') in {round(time.time()-start,1)}s"
+            log("CLIENT " + res["reason"])
+            time.sleep(8)   # let a few in-world ticks run before teardown
+            break
+        time.sleep(5)
+    else:
+        res["reason"] = f"no join within {timeout}s (see {client_log})"
+        log(res["reason"])
+    console.close()
+    _stop_client(proc)
+    if res["client_exit"] is None:
+        res["client_exit"] = proc.returncode
+    return res
+
+
+def boot_server(timeout=600, soak=180, extra_flags=None, run_client=False):
     """Boot the clone headless, wait for readiness, soak, then stop. Returns a result dict."""
     # Capture the server console to our own file and watch THAT (the log4j console
     # appender prints everything: mod loading, "Done (", our AsyncPathfinding lines).
@@ -151,7 +227,7 @@ def boot_server(timeout=600, soak=180, extra_flags=None):
     result = {
         "ready": False, "ready_secs": None, "async_pf_init": False,
         "async_pf_stats": None, "unsatisfied_link": False, "new_crashes": [],
-        "fatal_lines": [], "timed_out": False, "exit_code": None,
+        "fatal_lines": [], "timed_out": False, "exit_code": None, "client": None,
     }
 
     start = time.time()
@@ -181,6 +257,10 @@ def boot_server(timeout=600, soak=180, extra_flags=None):
             log(f"TIMEOUT after {timeout}s waiting for readiness")
             break
         time.sleep(5)
+
+    # Phase 1.5: client auto-join (only if ready and requested) — server stays up during this.
+    if ready and run_client:
+        result["client"] = boot_client(server_log)
 
     # Phase 2: soak (only if ready) — let mob AI run, watch for exceptions/stats.
     if ready and soak > 0:
@@ -256,8 +336,13 @@ def report_smoke(result):
         result["ready"] and not result["unsatisfied_link"]
         and not result["new_crashes"] and not result["timed_out"]
     )
+    client = result.get("client")
+    if client is not None:
+        log(f"  client: joined={client['joined']} exit={client['client_exit']} — {client['reason']}")
+        pass_ = pass_ and client["joined"]
     log("=" * 60)
-    log(f"SERVER PHASE: {'PASS' if pass_ else 'FAIL'}")
+    phase = "SMOKE (server+client)" if client is not None else "SERVER PHASE"
+    log(f"{phase}: {'PASS' if pass_ else 'FAIL'}")
     return pass_
 
 
@@ -269,9 +354,9 @@ def cmd_smoke(args):
     swap_oat(jar)
     configure_server(online_mode=False, fresh_world=not args.keep_world)
     result = boot_server(timeout=args.timeout, soak=args.soak,
-                         extra_flags=["-Dmoddirector.devMode=true"] if args.devmode else None)
+                         extra_flags=["-Dmoddirector.devMode=true"] if args.devmode else None,
+                         run_client=args.client)
     ok = report_smoke(result)
-    # TODO client auto-join phase (needs server kept running) — see docs/10.
     if not args.keep:
         log(f"cleaning up clone {SMOKE_CLONE}")
         shutil.rmtree(SMOKE_CLONE, ignore_errors=True)
@@ -292,6 +377,9 @@ def main():
     sp.add_argument("--devmode", action="store_true",
                     help="boot with -Dmoddirector.devMode=true (FileDirector smoke: exercises the "
                          "keep-existing-variant path + the dir-listing cache)")
+    sp.add_argument("--client", action="store_true",
+                    help="after the server is ready, boot the GUI client and auto-join it (needs a "
+                         "DISPLAY); PASS also requires the client to join")
     sp.set_defaults(func=cmd_smoke)
 
     args = ap.parse_args()
