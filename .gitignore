@@ -14,3 +14,4 @@ __pycache__/
 /Catpackutilities/utilities/memory_leak_reports
 Catpackutilities/utilities/package_report_raw.txt
 Catpackutilities/utilities/package_report_wildcard.txt
+.env.local

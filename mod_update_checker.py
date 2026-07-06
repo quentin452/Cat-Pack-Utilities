@@ -10,10 +10,14 @@ Age ranking fallback that needs NO network/API: the newest zip-entry
 timestamp inside each jar approximates its build date — good enough to
 rank the oldest mods across the whole mods/ folder.
 
+Configuration (.env committed defaults, .env.local for secrets, gitignored;
+real environment variables win over both):
+  INSTANCE_PATH  path to the CurseForge instance (or use --instance)
+  CF_API_KEY     enables the CurseForge lookups (console.curseforge.com, free)
+
 Usage:
   mod_update_checker.py [--instance PATH] [--top N] [--json OUT]
                         [--skip-github] [--skip-curse] [--skip-zipdates]
-  CF_API_KEY=... enables the CurseForge lookups (console.curseforge.com, free).
 """
 import argparse
 import concurrent.futures
@@ -26,10 +30,27 @@ import sys
 import urllib.request
 import zipfile
 
-DEFAULT_INSTANCE = "/home/iamacat/Documents/curseforge/minecraft/Instances/Biggess Pack Cat Edition V1"
 CF_API = "https://api.curseforge.com"
 MODRINTH_API = "https://api.modrinth.com/v2"
 GH_URL_RE = re.compile(r"github\.com/([^/]+)/([^/]+)/releases/download/([^/]+)/([^/?]+)")
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def load_dotenv():
+    """Merge .env then .env.local into the config; real env vars win."""
+    conf = {}
+    for name in (".env", ".env.local"):
+        path = os.path.join(SCRIPT_DIR, name)
+        if not os.path.isfile(path):
+            continue
+        for line in open(path):
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            conf[k.strip()] = v.strip().strip("'\"")
+    conf.update({k: v for k, v in os.environ.items() if k in ("INSTANCE_PATH", "CF_API_KEY")})
+    return conf
 
 
 def http_json(url, method="GET", body=None, headers=None):
@@ -183,14 +204,19 @@ def check_modrinth(entries):
 
 
 def main():
+    env = load_dotenv()
     ap = argparse.ArgumentParser()
-    ap.add_argument("--instance", default=DEFAULT_INSTANCE)
+    ap.add_argument("--instance", default=env.get("INSTANCE_PATH"))
     ap.add_argument("--top", type=int, default=30)
     ap.add_argument("--json", help="write full JSON report here")
     ap.add_argument("--skip-github", action="store_true")
     ap.add_argument("--skip-curse", action="store_true")
     ap.add_argument("--skip-zipdates", action="store_true")
     args = ap.parse_args()
+    if not args.instance:
+        sys.exit("Instance non configurée : --instance PATH ou INSTANCE_PATH dans .env/.env.local")
+    if not os.path.isdir(args.instance):
+        sys.exit(f"Instance introuvable : {args.instance}")
 
     bundles = load_bundles(args.instance)
     report = {"instance": args.instance,
@@ -213,7 +239,7 @@ def main():
         ups = [r for r in report["github"] if r["updateAvailable"]]
         print(f"  {len(ups)} updates, {len(errs)} repos sans release lisible")
 
-    key = os.environ.get("CF_API_KEY")
+    key = env.get("CF_API_KEY")
     if not args.skip_curse and bundles["curse"]:
         if key:
             print(f"\n== CurseForge ({len(bundles['curse'])} addons) ==")
