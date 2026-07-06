@@ -3,10 +3,11 @@
 bundle_check.py — pre-release validator for a modpack's mod-director bundles.
 
 Before shipping a pack update, every mod must actually be fetchable by players:
-  - CurseForge mods (curse.bundle.json): the file must exist, be available, be Approved,
-    and — the usual footgun — expose a downloadUrl. A CF author who disables third-party
-    distribution leaves downloadUrl = null, so mod-director fails for everyone even though
-    the file is "approved". This is the #1 thing to catch before release.
+  - CurseForge mods (curse.bundle.json): the file must exist, be available, and be Approved.
+    Note: the OFFICIAL CF API nulls downloadUrl when an author disables third-party API
+    distribution, but mod-director downloads via api.curse.tools -> the forgecdn CDN URL, which
+    still works. So a null downloadUrl is only a problem if the constructed CDN URL is ALSO dead
+    (we verify that). Flagging null-downloadUrl alone was the BUG-010 false positive.
   - URL mods (url.bundle.json): the link must return 200 (dead GitHub release => broken pack).
 
 Reads the bundle dir (default: the pack source's config/mod-director), checks everything,
@@ -110,7 +111,15 @@ def check_curse(entries, api_key):
         if f.get("fileStatus") != CF_APPROVED:
             problems.append((label, f"fileStatus={f.get('fileStatus')} (not Approved=4)"))
         if not f.get("downloadUrl"):
-            problems.append((label, "downloadUrl is null (author disabled third-party download)"))
+            # The OFFICIAL CF API nulls downloadUrl when an author disables third-party API
+            # distribution — but mod-director fetches via api.curse.tools, which serves the forgecdn
+            # CDN URL, and that still works. So a null downloadUrl is only a real problem if the
+            # constructed CDN URL is also unreachable. (This was the BUG-010 false-positive source.)
+            fn = f.get("fileName") or e.get("fileName") or ""
+            cdn = f"https://mediafilez.forgecdn.net/files/{fid // 1000}/{fid % 1000}/{urllib.parse.quote(fn)}"
+            err = check_one_url(cdn)
+            if err:
+                problems.append((label, f"downloadUrl null AND CDN URL fails ({err}): {cdn}"))
     return problems
 
 
