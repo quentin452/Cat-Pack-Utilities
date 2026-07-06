@@ -100,26 +100,31 @@ def check_curse(entries, api_key):
         for f in data:
             seen[f.get("id")] = f
 
+    # mod-director fetches CF mods via api.curse.tools -> the forgecdn CDN URL. The OFFICIAL API's
+    # flags (isAvailable, fileStatus, even downloadUrl) do NOT reflect that path — curse.tools serves
+    # the CDN URL even for files the official API marks unavailable/null (verified on the whole
+    # BUG-010 set). So the ONLY true fetchability test is: does the constructed CDN URL respond?
+    # We only pay for that HEAD on entries the official API is unhappy about (keeps it fast).
     for fid, e in by_file.items():
         label = e.get("fileName") or f"addon {e.get('addonId')} file {fid}"
         f = seen.get(fid)
+        reasons = []
         if f is None:
-            problems.append((label, f"fileId {fid} not returned by CF (deleted/invalid?)"))
-            continue
-        if not f.get("isAvailable", False):
-            problems.append((label, "not available on CurseForge"))
-        if f.get("fileStatus") != CF_APPROVED:
-            problems.append((label, f"fileStatus={f.get('fileStatus')} (not Approved=4)"))
-        if not f.get("downloadUrl"):
-            # The OFFICIAL CF API nulls downloadUrl when an author disables third-party API
-            # distribution — but mod-director fetches via api.curse.tools, which serves the forgecdn
-            # CDN URL, and that still works. So a null downloadUrl is only a real problem if the
-            # constructed CDN URL is also unreachable. (This was the BUG-010 false-positive source.)
-            fn = f.get("fileName") or e.get("fileName") or ""
-            cdn = f"https://mediafilez.forgecdn.net/files/{fid // 1000}/{fid % 1000}/{urllib.parse.quote(fn)}"
-            err = check_one_url(cdn)
-            if err:
-                problems.append((label, f"downloadUrl null AND CDN URL fails ({err}): {cdn}"))
+            reasons.append("not returned by the official CF API")
+        else:
+            if not f.get("isAvailable", False):
+                reasons.append("isAvailable=false")
+            if f.get("fileStatus") != CF_APPROVED:
+                reasons.append(f"fileStatus={f.get('fileStatus')}")
+            if not f.get("downloadUrl"):
+                reasons.append("API downloadUrl=null")
+        if not reasons:
+            continue   # approved + available + has a downloadUrl -> fetchable, no need to probe
+        fn = (f or {}).get("fileName") or e.get("fileName") or ""
+        cdn = f"https://mediafilez.forgecdn.net/files/{fid // 1000}/{fid % 1000}/{urllib.parse.quote(fn)}"
+        if check_one_url(cdn) is None:
+            continue   # CDN serves it -> mod-director can install it despite the official flags
+        problems.append((label, f"NOT fetchable — official API: {', '.join(reasons)}; CDN dead: {cdn}"))
     return problems
 
 
