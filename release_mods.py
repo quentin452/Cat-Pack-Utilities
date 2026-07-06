@@ -46,6 +46,51 @@ def git(repo, *args, check=True):
     return run(["git", "-C", repo, *args], check=check)[0]
 
 
+def verify_targets(mod):
+    """Stage-1: confirm the configured upload destinations are valid before any build/upload.
+    Returns list of failure strings (empty = ok)."""
+    fails = []
+    cf = mod.get("curseforge")
+    if cf:
+        _, code = run(["python3", os.path.join(SCRIPT_DIR, "cf_upload.py"), "--verify",
+                       "--project-id", str(cf["project_id"]),
+                       "--game-version", cf.get("game_version", "1.7.10")], check=False)
+        if code != 0:
+            fails.append(f"CF project {cf['project_id']} verify failed")
+    mr = mod.get("modrinth")
+    if mr:
+        _, code = run(["python3", os.path.join(SCRIPT_DIR, "modrinth_upload.py"), "--verify",
+                       "--project", str(mr["project"])], check=False)
+        if code != 0:
+            fails.append(f"Modrinth {mr['project']} verify failed")
+    return fails
+
+
+def stage1_checks(mod):
+    """Non-destructive pre-pass. Returns (ok, [messages])."""
+    repo = os.path.expanduser(mod["repo"])
+    msgs = []
+    if not os.path.isdir(os.path.join(repo, ".git")):
+        return False, [f"not a git repo: {repo}"]
+    if git(repo, "status", "--porcelain"):
+        return False, ["working tree not clean"]
+    cur = git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+    if cur != mod["branch"]:
+        return False, [f"on branch '{cur}', expected '{mod['branch']}'"]
+    _, code = run(["git", "-C", repo, "rev-parse", "--abbrev-ref", "@{u}"], check=False)
+    if code != 0:
+        return False, ["no upstream (git push -u once first)"]
+    ahead = git(repo, "rev-list", "--count", "@{u}..HEAD")
+    if ahead != "0":
+        msgs.append(f"{ahead} unpushed commit(s) (push pass will handle)")
+    tfails = verify_targets(mod)
+    if tfails:
+        return False, tfails
+    if mod.get("curseforge") or mod.get("modrinth"):
+        msgs.append("upload targets verified")
+    return True, msgs
+
+
 def find_jar(repo, mod):
     cands = [p for p in glob.glob(os.path.join(repo, mod["jar_glob"]))
              if not any(x in os.path.basename(p) for x in mod.get("jar_exclude", []))]
@@ -188,15 +233,34 @@ def main():
 
     mode = "EXECUTE" if args.execute else "DRY-RUN"
     print(f"===== release_mods [{mode}] — {len(mods)} mod(s) =====\n")
-    ok = 0
+
+    # Stage 1: non-destructive checks for ALL mods (fail fast before any build/publish).
+    print("----- Stage 1: verify (tree/branch/upstream + upload targets) -----")
+    ready = []
     for m in mods:
         try:
+            ok, msgs = stage1_checks(m)
+        except Exception as e:
+            ok, msgs = False, [f"error: {e}"]
+        tag = "OK " if ok else "FAIL"
+        print(f"  [{tag}] {m['name']}" + (f"  ({'; '.join(msgs)})" if msgs else ""))
+        if ok:
+            ready.append(m)
+    print(f"  -> {len(ready)}/{len(mods)} pass Stage 1\n")
+    if not ready:
+        sys.exit("Nothing passes Stage 1.")
+
+    # Stage 2: release only the mods that passed Stage 1.
+    print("----- Stage 2: release -----")
+    done = 0
+    for m in ready:
+        try:
             if release_one(m, args.execute, args.skip_build):
-                ok += 1
+                done += 1
         except Exception as e:
             print(f"  [{m['name']}] ERROR: {e}")
         print()
-    print(f"===== {ok}/{len(mods)} {'released' if args.execute else 'ready'} =====")
+    print(f"===== {done}/{len(ready)} {'released' if args.execute else 'ready'} =====")
 
 
 if __name__ == "__main__":

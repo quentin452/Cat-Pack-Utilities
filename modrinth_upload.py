@@ -44,6 +44,29 @@ def load_token():
     return tok
 
 
+def api_get(path, token=None):
+    req = urllib.request.Request(f"{API}{path}", method="GET")
+    req.add_header("Accept", "application/json")
+    if token:
+        req.add_header("Authorization", token)
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return json.load(r)
+
+
+def verify(token, project):
+    """Pre-flight: project/slug exists + token valid, no upload."""
+    try:
+        p = api_get(f"/project/{project}")
+        print(f"[modrinth-verify] project '{project}' exists: {p.get('title')} (id {p.get('id')})")
+    except Exception as ex:
+        raise SystemExit(f"[modrinth-verify] project '{project}' not found (reserve the slug first?): {ex}")
+    try:
+        u = api_get("/user", token)
+        print(f"[modrinth-verify] token OK (user {u.get('username')})")
+    except Exception as ex:
+        raise SystemExit(f"[modrinth-verify] token invalid: {ex}")
+
+
 def encode_multipart(data_json, filename, file_bytes):
     boundary = "----modrinth7MA4YWxkTrZu0gW"
     parts = []
@@ -62,8 +85,8 @@ def encode_multipart(data_json, filename, file_bytes):
 def main():
     ap = argparse.ArgumentParser(description="Upload a jar version to Modrinth.")
     ap.add_argument("--project", required=True, help="Modrinth project id or slug")
-    ap.add_argument("--file", required=True)
-    ap.add_argument("--version", required=True, help="version_number, e.g. V0.1.0")
+    ap.add_argument("--file", help="jar to upload (required unless --verify)")
+    ap.add_argument("--version", help="version_number, e.g. V0.1.0 (required unless --verify)")
     ap.add_argument("--name", help="display name (default = version)")
     ap.add_argument("--game-version", default=DEFAULT_GAME_VERSION)
     ap.add_argument("--loader", default=DEFAULT_LOADER)
@@ -71,9 +94,17 @@ def main():
     ap.add_argument("--changelog", default="")
     ap.add_argument("--changelog-file")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--verify", action="store_true", help="pre-flight: project exists + token, no upload")
     args = ap.parse_args()
 
     token = load_token()
+
+    if args.verify:
+        verify(token, args.project)
+        return
+
+    if not args.file or not args.version:
+        sys.exit("--file and --version are required (or use --verify)")
     if not os.path.isfile(args.file):
         sys.exit(f"file not found: {args.file}")
 

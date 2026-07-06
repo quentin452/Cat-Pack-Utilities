@@ -28,7 +28,7 @@
     {
       "name": "FileDirector",
       "repo": "~/Documents/GitHub/FileDirector",
-      "branch": "feat/dev-mode-and-mod-names",
+      "branch": "master",
       "version": "1.9.1-fork7",
       "gh_title": "1.7.10 V1.9.1-fork7",
       "jar_glob": "mod-director-launchwrapper/build/libs/mod-director-launchwrapper-*-all.jar",

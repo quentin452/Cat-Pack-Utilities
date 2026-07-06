@@ -53,6 +53,42 @@ def api_get(path, token):
         return json.load(r)
 
 
+def read_api_key():
+    """Optional CF_API_KEY (read API) for verifying a project exists — not the upload token."""
+    for name in (".env", ".env.local"):
+        path = os.path.join(SCRIPT_DIR, name)
+        if not os.path.isfile(path):
+            continue
+        for line in open(path):
+            line = line.strip()
+            if line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            if k.strip() == "CF_API_KEY":
+                return v.strip().strip("'\"")
+    return os.environ.get("CF_API_KEY")
+
+
+def verify(token, project_id, game_version):
+    """Pre-flight: upload token valid + game version resolvable + (if possible) project exists."""
+    vid = resolve_game_version_id(token, game_version)  # raises if token/version bad
+    print(f"[cf-verify] token OK, {game_version} -> id {vid}")
+    if project_id:
+        key = read_api_key()
+        if key:
+            try:
+                req = urllib.request.Request(f"https://api.curseforge.com/v1/mods/{project_id}", method="GET")
+                req.add_header("x-api-key", key)
+                req.add_header("Accept", "application/json")
+                with urllib.request.urlopen(req, timeout=20) as r:
+                    mod = json.load(r)["data"]
+                print(f"[cf-verify] project {project_id} exists: {mod.get('name')}")
+            except Exception as ex:
+                raise SystemExit(f"[cf-verify] project {project_id} not found via read API: {ex}")
+        else:
+            print(f"[cf-verify] project {project_id} existence not checked (no CF_API_KEY read key)")
+
+
 def resolve_game_version_id(token, name):
     """Return the numeric CF game-version id for e.g. '1.7.10'."""
     versions = api_get("/api/game/versions", token)
@@ -128,6 +164,8 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--list-versions", action="store_true",
                     help="just print the game-version id and exit (token check)")
+    ap.add_argument("--verify", action="store_true",
+                    help="pre-flight: token valid + project exists, no upload")
     args = ap.parse_args()
 
     token = load_token()
@@ -135,6 +173,10 @@ def main():
     if args.list_versions:
         vid = resolve_game_version_id(token, args.game_version)
         print(f"{args.game_version} -> game version id {vid}")
+        return
+
+    if args.verify:
+        verify(token, args.project_id, args.game_version)
         return
 
     if not (args.project_id and args.file):
