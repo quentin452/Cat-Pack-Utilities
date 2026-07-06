@@ -188,11 +188,15 @@ def main():
     if args.changelog_file:
         changelog = open(args.changelog_file, encoding="utf-8").read()
 
-    version_id = resolve_game_version_id(token, args.game_version)
+    # --game-version accepts a comma-separated list. Special mods (e.g. the mod-director bootstrapper,
+    # which is version-agnostic) must be tagged with ALL supported MC versions, not just 1.7.10, or
+    # they're undiscoverable on other versions and inconsistent with prior files.
+    names = [v.strip() for v in args.game_version.split(",") if v.strip()]
+    version_ids = [resolve_game_version_id(token, n) for n in names]
     metadata = {
         "changelog": changelog,
         "changelogType": args.changelog_type,
-        "gameVersions": [version_id],
+        "gameVersions": version_ids,
         "releaseType": args.release_type,
     }
     if args.display_name:
