@@ -218,12 +218,17 @@ def release_one(mod, execute, skip_build):
             return False
         jar = None
 
-    # Changelog = commits since previous tag
+    # Changelog = commits since previous tag. Format as a markdown bullet list: raw subject lines
+    # separated by single newlines collapse into ONE paragraph in markdown (CF/Modrinth/GitHub all
+    # render the changelog as markdown), so CF showed the whole changelog on a single line. Bullets
+    # render as separate lines everywhere.
     rng = f"{prev_tag}..HEAD" if prev_tag else "HEAD"
-    changelog = git(repo, "log", "--reverse", "--format=%s", rng, check=False)
-    log(f"changelog ({rng}): {len(changelog.splitlines())} commit(s)")
-    for line in changelog.splitlines()[:12]:
+    subjects = [s for s in git(repo, "log", "--reverse", "--format=%s", rng, check=False).splitlines()
+                if s.strip()]
+    log(f"changelog ({rng}): {len(subjects)} commit(s)")
+    for line in subjects[:12]:
         print(f"      - {line}")
+    changelog = "\n".join(f"- {s}" for s in subjects)
 
     if not execute:
         tgt = ["GitHub"]
