@@ -13,6 +13,12 @@ Usage:
   python3 changelog_from_bundles.py <old_ref> [new_ref]     # default new_ref = HEAD
   python3 changelog_from_bundles.py 0dffdb8e HEAD
 Run inside the pack repo, or pass --pack <dir>.
+
+NOTE 2 pièges (audit 2026-07-07, user):
+  1. BASELINE = la dernière version PUBLIÉE (tag/CHANGELOG), PAS le dernier commit. Ex: V1.1.7=6109ff44,
+     pas 0dffdb8e — sinon on rate les changements unpublished (HEGM removal). Passer le bon <old_ref>.
+  2. Un re-upload SAME-URL (eotg V1.5.6 re-tag, contenu changé, URL identique) = INVISIBLE ici (diff par
+     URL/version string). Ces mods = à ajouter À LA MAIN (le tool ne voit pas le contenu).
 """
 import json
 import os
