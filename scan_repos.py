@@ -57,10 +57,17 @@ def main():
             continue
         upstream = git(path, "remote", "get-url", "upstream")
         is_fork = bool(upstream) or name in FORK_OVERRIDE
-        # MC-mod heuristic: a gradle build present (most 1.7.10 mods use RFG/Forge gradle)
+        # A gradle build present (most 1.7.10 mods use RFG/Forge gradle) — necessary but NOT
+        # sufficient to be a MC mod (CatzEngine/binary-greedy-meshing have gradle but aren't mods).
         is_gradle = os.path.exists(os.path.join(path, "build.gradle")) or \
             os.path.exists(os.path.join(path, "build.gradle.kts")) or \
             os.path.exists(os.path.join(path, "gradle.properties"))
+        # is_mod = ships an mcmod.info descriptor = the DEFINITIVE "this is a MC mod" marker. This
+        # is what changelog/release tracking must filter on — a fork that is not a mod (rendering
+        # engine, meshing lib) should never be flagged as an untracked pack mod. (BUG: track_audit
+        # used is_fork and false-flagged CatzEngine/binary-greedy-meshing — 2026-07-07.)
+        src = os.path.join(path, "src")
+        is_mod = os.path.isdir(src) and any("mcmod.info" in fns for _, _, fns in os.walk(src))
         repos.append({
             "name": name,
             "path": f"~/Documents/GitHub/{name}",
@@ -69,6 +76,7 @@ def main():
             "is_fork": is_fork,
             "branch": git(path, "branch", "--show-current"),
             "gradle": is_gradle,
+            "is_mod": is_mod,
             "in_release_manifest": name in manifest_repos,
         })
 
@@ -79,6 +87,7 @@ def main():
                     "Release config (version/CF ids/targets) lives in release-manifest.json, not here.",
         "count": len(repos),
         "forks": sum(1 for r in repos if r["is_fork"]),
+        "mods": sum(1 for r in repos if r.get("is_mod")),
         "repos": repos,
     }
     if "--print" in sys.argv:
