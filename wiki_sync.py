@@ -140,8 +140,9 @@ def main():
         print(f"... ({len(page)} chars total; pass --wiki <clone> to write)")
         return
     (args.wiki / "Mixins.md").write_text(page, encoding="utf-8")
-    (args.wiki / "Optimizations.md").write_text(STUB, encoding="utf-8")
-    (args.wiki / "Tweaks.md").write_text(STUB, encoding="utf-8")
+    for stale in ("Optimizations.md", "Tweaks.md", "Fixe.md"):
+        if (args.wiki / stale).is_file():
+            (args.wiki / stale).write_text(STUB, encoding="utf-8")
     home = args.wiki / "Home.md"
     if home.is_file() and "Mixins" not in home.read_text(encoding="utf-8"):
         home.write_text(home.read_text(encoding="utf-8").rstrip()
