@@ -81,12 +81,14 @@ def cdn_ok(file_id, file_name):
 
 
 def replace_value(path, old_str, new_str, label):
-    """Format-preserving single substring replace; records a change or a problem."""
-    text = open(path, encoding="utf-8").read()
-    n = text.count(old_str)
+    """Format-preserving single substring replace. Operates on BYTES so CRLF line endings (curse.bundle
+    is CRLF) survive — a text-mode read/write would normalize CRLF->LF and rewrite the whole file."""
+    data = open(path, "rb").read()
+    old_b, new_b = old_str.encode("utf-8"), new_str.encode("utf-8")
     if old_str == new_str:
         log(f"    = {label}: already up to date ({new_str})")
         return
+    n = data.count(old_b)
     if n == 0:
         problems.append(f"{label}: {old_str!r} not found in {os.path.basename(path)}")
         return
@@ -95,7 +97,7 @@ def replace_value(path, old_str, new_str, label):
         return
     changes.append((path, old_str, new_str))
     if APPLY:
-        open(path, "w", encoding="utf-8").write(text.replace(old_str, new_str))
+        open(path, "wb").write(data.replace(old_b, new_b))
     log(f"    {'APPLIED' if APPLY else 'would change'} {label}: {old_str} -> {new_str}")
 
 
