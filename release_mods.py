@@ -280,10 +280,13 @@ def main():
     args = ap.parse_args()
 
     mods = json.load(open(args.manifest))["mods"]
+    # Skip pack-delivery-only entries (no build config) — those exist purely to drive pack_sync
+    # (e.g. a fork already released upstream-by-me, tracked only for the pack bundle version).
+    mods = [m for m in mods if m.get("build")]
     if args.only:
         mods = [m for m in mods if m["name"] == args.only]
         if not mods:
-            sys.exit(f"no mod named {args.only!r} in manifest")
+            sys.exit(f"no releasable mod named {args.only!r} in manifest (pack-only entries are skipped)")
 
     mode = "EXECUTE" if args.execute else "DRY-RUN"
     print(f"===== release_mods [{mode}] — {len(mods)} mod(s) =====\n")
