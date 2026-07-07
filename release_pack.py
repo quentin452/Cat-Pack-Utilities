@@ -144,11 +144,26 @@ def main():
     if pub.returncode != 0:
         print("⚠️ changelog_publish failed — prepend it by hand.")
 
+    # step 9 — commit the cut + push. The release is already PUBLIC on CF at this point:
+    # origin must reflect what players have (and the next release's --baseline is this commit).
+    subprocess.run(["git", "-C", str(PACK_REPO), "add",
+                    str(PACK_DIR / "src/client/manifest.json"),
+                    str(PACK_DIR / "src/common/config/mod-director/modpack.json"),
+                    str(PACK_REPO / "CHANGELOGS/SUPPORTED/1.7.10 Bigges Pack Cat Edition.md")], check=True)
+    msg = (f"release: cut V{args.version} (CF files {client_fid} client + serverpack attached)")
+    subprocess.run(["git", "-C", str(PACK_REPO), "commit", "-m", msg], check=True)
+    cut_ref = subprocess.run(["git", "-C", str(PACK_REPO), "rev-parse", "--short", "HEAD"],
+                             capture_output=True, text=True).stdout.strip()
+    branch = subprocess.run(["git", "-C", str(PACK_REPO), "branch", "--show-current"],
+                            capture_output=True, text=True).stdout.strip()
+    push = subprocess.run(["git", "-C", str(PACK_REPO), "push", "origin", branch])
+    push_note = "pushed" if push.returncode == 0 else "⚠️ PUSH FAILED — push manually"
+
     print(f"""
 === RELEASE {args.version} UPLOADED ===
 client file id: {client_fid} (serverpack attached as additional file)
+cut commit: {cut_ref} ({push_note}) — use it as --baseline for the next release
 Remaining (manual):
-  - git add/commit the version bump + CHANGELOG in the pack repo (then YOU push)
   - watch CF review (modpack = manual review)
   - housekeeping skill (archive bugs), update pipeline-mods.md""")
 
