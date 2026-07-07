@@ -136,7 +136,7 @@ def find_jar(repo, mod):
     return max(cands, key=os.path.getmtime)
 
 
-def release_one(mod, execute, skip_build):
+def release_one(mod, execute, skip_build, changelog_override=None):
     name = mod["name"]
     repo = os.path.expanduser(mod["repo"])
     version = mod["version"]
@@ -229,6 +229,9 @@ def release_one(mod, execute, skip_build):
     for line in subjects[:12]:
         print(f"      - {line}")
     changelog = "\n".join(f"- {s}" for s in subjects)
+    if changelog_override:
+        changelog = changelog_override
+        log(f"changelog OVERRIDDEN (--changelog-file): {len(changelog.splitlines())} line(s) — curated wording replaces the raw commit subjects")
 
     if not execute:
         tgt = ["GitHub"]
@@ -277,6 +280,7 @@ def main():
     ap.add_argument("--only", help="release only this mod name")
     ap.add_argument("--execute", action="store_true", help="actually tag/push/publish (default: dry-run)")
     ap.add_argument("--skip-build", action="store_true", help="trust an existing build")
+    ap.add_argument("--changelog-file", help="curated release notes (markdown); only with --only")
     args = ap.parse_args()
 
     mods = json.load(open(args.manifest))["mods"]
@@ -287,6 +291,14 @@ def main():
         mods = [m for m in mods if m["name"] == args.only]
         if not mods:
             sys.exit(f"no releasable mod named {args.only!r} in manifest (pack-only entries are skipped)")
+    override = None
+    if args.changelog_file:
+        if not args.only:
+            sys.exit("--changelog-file requires --only (one curated text for one mod)")
+        with open(args.changelog_file, encoding="utf-8") as f:
+            override = f.read().strip()
+        if not override:
+            sys.exit(f"--changelog-file {args.changelog_file} is empty")
 
     mode = "EXECUTE" if args.execute else "DRY-RUN"
     print(f"===== release_mods [{mode}] — {len(mods)} mod(s) =====\n")
@@ -312,7 +324,7 @@ def main():
     done = 0
     for m in ready:
         try:
-            if release_one(m, args.execute, args.skip_build):
+            if release_one(m, args.execute, args.skip_build, changelog_override=override):
                 done += 1
         except Exception as e:
             print(f"  [{m['name']}] ERROR: {e}")
