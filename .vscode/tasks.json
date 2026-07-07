@@ -141,6 +141,14 @@
       "options": { "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities" },
       "detail": "Safety net: owned mods with unpushed commits but no changelog-pending entry (esp. agent edits that can't touch the hub). Run before wrapping a session / a release.",
       "problemMatcher": []
+    },
+    {
+      "label": "Security: GitHub alerts across mods",
+      "type": "shell",
+      "command": "python3 security_audit.py",
+      "options": { "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities" },
+      "detail": "Pull GitHub Dependabot + code-scanning alerts across owned mods (is_mod). Fix at the ecosystem level (cargo/gradle bump). Needs gh authed. Run before a release.",
+      "problemMatcher": []
     }
   ]
 }
