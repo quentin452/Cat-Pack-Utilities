@@ -227,6 +227,16 @@
       },
       "detail": "End-to-end delivery dashboard: unreleased commits per mod, CF latest file status, pack bundle refs, stale instance jars + NEXT ACTIONS. Read-only. Run at session start and before any release.",
       "problemMatcher": []
+    },
+    {
+      "label": "Wiki: sync OaT Mixins page (generate from code)",
+      "type": "shell",
+      "command": "rm -rf /tmp/oat-wiki && git clone -q https://github.com/quentin452/OptimizationsAndTweaks.wiki.git /tmp/oat-wiki && python3 wiki_sync.py --wiki /tmp/oat-wiki && git -C /tmp/oat-wiki diff --stat",
+      "options": {
+        "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities"
+      },
+      "detail": "Regenerate wiki Mixins.md from asm/Mixin.java + mixin javadocs (kills the stale-wiki class). Review the diff, then commit+push the wiki clone yourself (PUBLIC).",
+      "problemMatcher": []
     }
   ]
 }
