@@ -1,6 +1,8 @@
 {
   "version": "2.0.0",
-  "options": { "cwd": "${workspaceFolder}" },
+  "options": {
+    "cwd": "${workspaceFolder}"
+  },
   "inputs": [
     {
       "id": "packVersion",
@@ -13,6 +15,12 @@
       "type": "promptString",
       "description": "Baseline ref = commit of the LAST PUBLISHED pack version (NOT the last commit). e.g. V1.1.8 = 0b5da501. Derives <baseline>..HEAD.",
       "default": "HEAD~1"
+    },
+    {
+      "id": "sparkDuration",
+      "type": "promptString",
+      "description": "Profiling window (seconds)",
+      "default": "60"
     }
   ],
   "tasks": [
@@ -20,7 +28,9 @@
       "label": "Pack: generate client+server zips",
       "type": "shell",
       "command": "python3 generate_modpack_zips.py ${input:packVersion}",
-      "options": { "cwd": "${env:HOME}/Documents/GitHub/privates-minecraft-modpack/MODPACKS/Biggess Pack Cat Edition" },
+      "options": {
+        "cwd": "${env:HOME}/Documents/GitHub/privates-minecraft-modpack/MODPACKS/Biggess Pack Cat Edition"
+      },
       "detail": "Build dist/BiggessPackCatEdition<v>.zip (client) + ...ServerPack<v>.zip. Bumps manifest+modpack.json. Self-verifies.",
       "problemMatcher": []
     },
@@ -56,7 +66,9 @@
       "label": "Pack: publish pending changelog (preview)",
       "type": "shell",
       "command": "python3 changelog_publish.py",
-      "options": { "cwd": "${env:HOME}/Documents/GitHub/privates-minecraft-modpack" },
+      "options": {
+        "cwd": "${env:HOME}/Documents/GitHub/privates-minecraft-modpack"
+      },
       "detail": "Preview cutting memory/changelog-pending.md into the pack CHANGELOG. Add --prepend to actually insert.",
       "problemMatcher": []
     },
@@ -64,7 +76,9 @@
       "label": "Pack: publish pending changelog (PREPEND)",
       "type": "shell",
       "command": "python3 changelog_publish.py --prepend",
-      "options": { "cwd": "${env:HOME}/Documents/GitHub/privates-minecraft-modpack" },
+      "options": {
+        "cwd": "${env:HOME}/Documents/GitHub/privates-minecraft-modpack"
+      },
       "detail": "Insert the pending block into the pack CHANGELOG for real.",
       "problemMatcher": []
     },
@@ -128,7 +142,9 @@
       "label": "Config: diff canonical vs instances",
       "type": "shell",
       "command": "python3 config_sync.py",
-      "options": { "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities" },
+      "options": {
+        "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities"
+      },
       "detail": "Preview game-config drift: canonical src/common/config vs TEST+server. A config CHANGE is edited in the CANONICAL (never the instance directly). Add --only <path> manually to scope.",
       "problemMatcher": []
     },
@@ -136,7 +152,9 @@
       "label": "Config: APPLY canonical -> instances",
       "type": "shell",
       "command": "python3 config_sync.py --apply",
-      "options": { "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities" },
+      "options": {
+        "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities"
+      },
       "detail": "Copy canonical config -> TEST+server (CRLF-safe). AFTER: changelog **config updated** + bump version + generate zips to ship client+server.",
       "problemMatcher": []
     },
@@ -144,7 +162,9 @@
       "label": "Track: audit untracked mod changes",
       "type": "shell",
       "command": "python3 track_audit.py",
-      "options": { "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities" },
+      "options": {
+        "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities"
+      },
       "detail": "Safety net: owned mods with unpushed commits but no changelog-pending entry (esp. agent edits that can't touch the hub). Run before wrapping a session / a release.",
       "problemMatcher": []
     },
@@ -152,7 +172,9 @@
       "label": "Security: GitHub alerts across mods",
       "type": "shell",
       "command": "python3 security_audit.py",
-      "options": { "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities" },
+      "options": {
+        "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities"
+      },
       "detail": "Pull GitHub Dependabot + code-scanning alerts across owned mods (is_mod). Fix at the ecosystem level (cargo/gradle bump). Needs gh authed. Run before a release.",
       "problemMatcher": []
     },
@@ -160,7 +182,9 @@
       "label": "Changelog: derive pending from git (per mod)",
       "type": "shell",
       "command": "python3 changelog_from_git.py",
-      "options": { "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities" },
+      "options": {
+        "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities"
+      },
       "detail": "Each owned mod's commits since its last release tag = its pending changelog (the commit IS the source, so it can never be stale/missing). --markdown for changelog-pending format. Curate wording at release.",
       "problemMatcher": []
     },
@@ -168,8 +192,20 @@
       "label": "Pack: changelog derive (bundles+config)",
       "type": "shell",
       "command": "python3 changelog_from_bundles.py ${input:changelogBaseline}",
-      "options": { "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities" },
+      "options": {
+        "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities"
+      },
       "detail": "Derive the WHOLE pack changelog for <baseline>..HEAD from git: mod add/update/remove (mod-director bundles + CF manifest, version-aware) PLUS game-config changes (src/common/config, mod-director/ excluded — one line per changed file, dirs with many files summarized, comment/blank-only edits filtered as noise). Baseline = commit of the last PUBLISHED pack version, not the last commit. Curate wording at release. Add --config-only / --no-config to scope.",
+      "problemMatcher": []
+    },
+    {
+      "label": "Profile: spark (in-game, save-to-file)",
+      "type": "shell",
+      "command": "python3 spark_profile.py --duration ${input:sparkDuration} --out ~/Documents/GitHub/Mod-Sandbox/docs/captures",
+      "options": {
+        "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities"
+      },
+      "detail": "Drive /spark profiler via matoulib RPC (game must be up, -Dmatoulib.rpc=true). Saves .sparkprofile locally — NEVER uploads (spark.lucko.me = public).",
       "problemMatcher": []
     }
   ]
