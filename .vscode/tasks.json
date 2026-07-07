@@ -1,12 +1,28 @@
 {
   "version": "2.0.0",
   "options": { "cwd": "${workspaceFolder}" },
+  "inputs": [
+    {
+      "id": "packVersion",
+      "type": "promptString",
+      "description": "Modpack version — dotted number, NO 'V' prefix (e.g. 1.1.8)",
+      "default": "1.1.8"
+    }
+  ],
   "tasks": [
     {
-      "label": "Pack: bundle check (fetchability)",
+      "label": "Pack: generate client+server zips",
+      "type": "shell",
+      "command": "python3 generate_modpack_zips.py ${input:packVersion}",
+      "options": { "cwd": "${env:HOME}/Documents/GitHub/privates-minecraft-modpack/MODPACKS/Biggess Pack Cat Edition" },
+      "detail": "Build dist/BiggessPackCatEdition<v>.zip (client) + ...ServerPack<v>.zip. Bumps manifest+modpack.json. Self-verifies.",
+      "problemMatcher": []
+    },
+    {
+      "label": "Pack: bundle check (fetchability) — PREFLIGHT",
       "type": "shell",
       "command": "python3 bundle_check.py",
-      "detail": "Every bundle mod downloadable? (CF Approved+downloadUrl, URL 200). BUG-010.",
+      "detail": "Every bundle mod downloadable? (CF Approved+downloadUrl, URL 200 via GET). Run before EVERY pack release. BUG-010.",
       "problemMatcher": []
     },
     {
@@ -14,6 +30,50 @@
       "type": "shell",
       "command": "python3 bundle_check.py --orphans \"${env:HOME}/Documents/curseforge/minecraft/Instances/Biggess Pack Cat Edition V1 TEST/mods\"",
       "detail": "Jars in the instance that NO bundle delivers (would be missing for players).",
+      "problemMatcher": []
+    },
+    {
+      "label": "Pack: sync bundle fileIDs vs GitHub (audit)",
+      "type": "shell",
+      "command": "python3 pack_sync.py --audit",
+      "detail": "Compare pack bundles vs real GitHub releases — catches stale forks outside the tracking. Preflight before a pack release.",
+      "problemMatcher": []
+    },
+    {
+      "label": "Pack: sync bundle fileIDs (apply)",
+      "type": "shell",
+      "command": "python3 pack_sync.py --apply",
+      "detail": "Write synced fileIDs into curse.bundle + client_manifest + server_jar + url.bundle (byte-mode, preserves CRLF).",
+      "problemMatcher": []
+    },
+    {
+      "label": "Pack: publish pending changelog (preview)",
+      "type": "shell",
+      "command": "python3 changelog_publish.py",
+      "options": { "cwd": "${env:HOME}/Documents/GitHub/privates-minecraft-modpack" },
+      "detail": "Preview cutting memory/changelog-pending.md into the pack CHANGELOG. Add --prepend to actually insert.",
+      "problemMatcher": []
+    },
+    {
+      "label": "Pack: publish pending changelog (PREPEND)",
+      "type": "shell",
+      "command": "python3 changelog_publish.py --prepend",
+      "options": { "cwd": "${env:HOME}/Documents/GitHub/privates-minecraft-modpack" },
+      "detail": "Insert the pending block into the pack CHANGELOG for real.",
+      "problemMatcher": []
+    },
+    {
+      "label": "Pack: smoke test (server)",
+      "type": "shell",
+      "command": "python3 release.py smoke",
+      "detail": "Boot a throwaway server clone, report PASS/FAIL. Never touches the real instance.",
+      "problemMatcher": []
+    },
+    {
+      "label": "Pack: smoke test (server + client auto-join)",
+      "type": "shell",
+      "command": "python3 release.py smoke --client --devmode",
+      "detail": "Server stays up, client boots + joins; confirmed via server log. Needs DISPLAY.",
       "problemMatcher": []
     },
     {
