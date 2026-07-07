@@ -7,6 +7,12 @@
       "type": "promptString",
       "description": "Modpack version — dotted number, NO 'V' prefix (e.g. 1.1.8)",
       "default": "1.1.8"
+    },
+    {
+      "id": "changelogBaseline",
+      "type": "promptString",
+      "description": "Baseline ref = commit of the LAST PUBLISHED pack version (NOT the last commit). e.g. V1.1.8 = 0b5da501. Derives <baseline>..HEAD.",
+      "default": "HEAD~1"
     }
   ],
   "tasks": [
@@ -156,6 +162,14 @@
       "command": "python3 changelog_from_git.py",
       "options": { "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities" },
       "detail": "Each owned mod's commits since its last release tag = its pending changelog (the commit IS the source, so it can never be stale/missing). --markdown for changelog-pending format. Curate wording at release.",
+      "problemMatcher": []
+    },
+    {
+      "label": "Pack: changelog derive (bundles+config)",
+      "type": "shell",
+      "command": "python3 changelog_from_bundles.py ${input:changelogBaseline}",
+      "options": { "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities" },
+      "detail": "Derive the WHOLE pack changelog for <baseline>..HEAD from git: mod add/update/remove (mod-director bundles + CF manifest, version-aware) PLUS game-config changes (src/common/config, mod-director/ excluded — one line per changed file, dirs with many files summarized, comment/blank-only edits filtered as noise). Baseline = commit of the last PUBLISHED pack version, not the last commit. Curate wording at release. Add --config-only / --no-config to scope.",
       "problemMatcher": []
     }
   ]

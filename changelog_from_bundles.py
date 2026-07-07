@@ -9,9 +9,17 @@ Respects the FileDirector convention (the trap): each bundle entry may carry met
 misread as affecting the server. url.bundle nests entries under arrays; curse identifies mods by
 addonId, github urls by owner/repo.
 
+Also derives CONFIG changes (src/common/config, with mod-director/ excluded — that subtree IS the
+bundle diff above) for the SAME ref pair, so the whole pack changelog comes from one tool / one
+baseline and the hand-maintained pending file can be retired. One concise line per changed config
+file; a directory with many changed files is summarized to a single line; comment/blank-only edits
+are filtered as noise. Config is on by default.
+
 Usage:
   python3 changelog_from_bundles.py <old_ref> [new_ref]     # default new_ref = HEAD
   python3 changelog_from_bundles.py 0dffdb8e HEAD
+  python3 changelog_from_bundles.py <old_ref> --no-config   # bundles/manifest only (legacy output)
+  python3 changelog_from_bundles.py <old_ref> --config-only # config section only
 Run inside the pack repo, or pass --pack <dir>.
 
 NOTE 2 pièges (audit 2026-07-07, user):
@@ -35,6 +43,15 @@ BUNDLES = [f"{MODPACK_SUB}/src/common/config/mod-director/curse.bundle.json",
 # CurseForge pack manifest (client) + a direct server jar. Diff the manifest too, else FileDirector's
 # own version bumps are invisible in the changelog (the trap: it's not in any bundle).
 CLIENT_MANIFEST = f"{MODPACK_SUB}/src/client/manifest.json"
+
+# --- config-change derivation (game config, NOT the mod-director bundles) -------------------------
+# The shipped game config lives here. mod-director/ is a subdir of it but is already the bundle diff
+# above, so it is excluded to avoid double-reporting the same mod add/update/remove.
+CONFIG_SUB = f"{MODPACK_SUB}/src/common/config"
+CONFIG_PREFIX = CONFIG_SUB + "/"
+CONFIG_EXCLUDE = ("mod-director/",)   # covered by the bundle/manifest diff
+GROUP_THRESHOLD = 4                   # a config subdir with >= this many changed files -> one summary line
+COMMENT_MARKERS = ("#", "//", ";")    # a changed line that is blank or starts with one of these = noise
 
 
 def git_show(repo, ref, path):
@@ -109,31 +126,162 @@ def sidetag(side):
     return "" if side == "BOTH" else f" ({side.lower()})"
 
 
+def _git(repo, *args):
+    r = subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True)
+    return r.stdout if r.returncode == 0 else ""
+
+
+def _rel_config(path):
+    """Repo-relative path -> path under config/ (e.g. 'cofh/world/Ores.json'), or None if it is
+    outside the config tree or in an excluded subdir (mod-director/)."""
+    if not path.startswith(CONFIG_PREFIX):
+        return None
+    rel = path[len(CONFIG_PREFIX):]
+    if any(rel.startswith(x) for x in CONFIG_EXCLUDE):
+        return None
+    return rel
+
+
+def _diff_is_noise(repo, old_ref, new_ref, rel):
+    """True if every changed line of this file is blank or a comment (# // ;). Cheap heuristic: it
+    catches header/timestamp/comment churn but NOT reordering, JSON key shuffles, or value-equivalent
+    reformatting — those still surface as real changes (favoring false-negative over hiding a change)."""
+    out = _git(repo, "diff", "-U0", old_ref, new_ref, "--", CONFIG_PREFIX + rel)
+    saw = False
+    for line in out.splitlines():
+        if line.startswith(("+++", "---")):
+            continue
+        if line and line[0] in "+-":
+            saw = True
+            body = line[1:].strip()
+            if body and not body.startswith(COMMENT_MARKERS):
+                return False          # a substantive changed line -> not noise
+    return saw                        # all changed lines trivial (and there was at least one)
+
+
+def config_changes(repo, old_ref, new_ref):
+    """(changes, skipped) for src/common/config between the two refs. changes = list of dicts
+    {rel, status(A/M/D), add, dele, binary}; skipped = count of comment/blank-only files filtered out.
+    Renames are reported as delete+add (no -M) to keep parsing robust against spaces in the pack path."""
+    status = {}
+    for line in _git(repo, "diff", "--name-status", old_ref, new_ref, "--", CONFIG_SUB).splitlines():
+        parts = line.split("\t")      # tab-separated: paths may contain spaces but never tabs
+        if len(parts) < 2:
+            continue
+        rel = _rel_config(parts[-1])
+        if rel is not None:
+            status[rel] = parts[0][:1]
+    counts = {}
+    for line in _git(repo, "diff", "--numstat", old_ref, new_ref, "--", CONFIG_SUB).splitlines():
+        parts = line.split("\t")      # '<added>\t<deleted>\t<path>'; '-' counts for binary files
+        if len(parts) < 3:
+            continue
+        rel = _rel_config(parts[-1])
+        if rel is not None:
+            counts[rel] = (parts[0], parts[1])
+    changes, skipped = [], 0
+    for rel in sorted(status):
+        st = status[rel]
+        add, dele = counts.get(rel, ("0", "0"))
+        binary = (add == "-" or dele == "-")
+        if st == "M" and not binary and _diff_is_noise(repo, old_ref, new_ref, rel):
+            skipped += 1
+            continue
+        changes.append({"rel": rel, "status": st, "add": add, "dele": dele, "binary": binary})
+    return changes, skipped
+
+
+def _file_line(c):
+    st = c["status"]
+    if c["binary"]:
+        mag = "(binary)"
+    elif st == "A":
+        mag = f"(+{c['add']} lines)"
+    elif st == "D":
+        mag = f"(-{c['dele']} lines)"
+    else:
+        mag = f"(+{c['add']}/-{c['dele']} lines)"
+    verb = {"A": "added", "D": "deleted", "M": "changed"}.get(st, "changed")
+    return f"* config: {c['rel']} {verb} {mag}"
+
+
+def _group_line(seg, items):
+    adds = sum(1 for c in items if c["status"] == "A")
+    dels = sum(1 for c in items if c["status"] == "D")
+    ta = sum(int(c["add"]) for c in items if not c["binary"])
+    td = sum(int(c["dele"]) for c in items if not c["binary"])
+    extra = [x for x in (f"{adds} added" if adds else "", f"{dels} deleted" if dels else "") if x]
+    tag = (", " + ", ".join(extra)) if extra else ""
+    return f"* config: {seg}/ — {len(items)} files changed (+{ta}/-{td} lines{tag})"
+
+
+def render_config(changes, skipped):
+    """Print the **config changed** section: group a directory with many changed files into one line,
+    else one line per file; append a noise-skip note. No output if nothing changed."""
+    if not changes and not skipped:
+        return
+    print("**config changed**")
+    groups, singles = {}, []
+    for c in changes:
+        seg = c["rel"].split("/", 1)[0] if "/" in c["rel"] else None  # None = top-level file
+        if seg is None:
+            singles.append(c)
+        else:
+            groups.setdefault(seg, []).append(c)
+    lines = []
+    for seg, items in groups.items():
+        if len(items) >= GROUP_THRESHOLD:
+            lines.append((seg + "/", _group_line(seg, items)))
+        else:
+            singles.extend(items)
+    for c in singles:
+        lines.append((c["rel"], _file_line(c)))
+    for _, text in sorted(lines):
+        print(text)
+    if skipped:
+        print(f"* _({skipped} config file(s) skipped: comment/whitespace-only changes)_")
+    print()
+
+
 def main():
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    pack = REPO_DEFAULT
-    if "--pack" in sys.argv:
-        pack = os.path.expanduser(sys.argv[sys.argv.index("--pack") + 1])
+    # positionals = argv minus --flags and the value consumed by --pack
+    pack, args, skip_next = REPO_DEFAULT, [], False
+    for i, a in enumerate(sys.argv[1:]):
+        if skip_next:
+            skip_next = False
+            continue
+        if a == "--pack":
+            pack = os.path.expanduser(sys.argv[i + 2]) if i + 2 < len(sys.argv) else pack
+            skip_next = True
+        elif not a.startswith("--"):
+            args.append(a)
+    want_config = "--no-config" not in sys.argv
+    config_only = "--config-only" in sys.argv
     if not args:
-        sys.exit("usage: changelog_from_bundles.py <old_ref> [new_ref]")
+        sys.exit("usage: changelog_from_bundles.py <old_ref> [new_ref] "
+                 "[--no-config|--config-only] [--pack <dir>]")
     old_ref, new_ref = args[0], (args[1] if len(args) > 1 else "HEAD")
 
     added, updated, removed = [], [], []
-    for path in BUNDLES + [CLIENT_MANIFEST]:
-        pfn = parse_manifest if path == CLIENT_MANIFEST else parse
-        old = pfn(git_show(pack, old_ref, path))
-        new = pfn(git_show(pack, new_ref, path))
-        for k, v in new.items():
-            if k not in old:
-                added.append((v["label"], v["side"]))
-            elif old[k]["version"] != v["version"]:
-                updated.append((old[k]["label"], v["label"], v["side"],
-                                old[k]["version"], v["version"]))
-        for k, v in old.items():
-            if k not in new:
-                removed.append((v["label"], v["side"]))
+    if not config_only:
+        for path in BUNDLES + [CLIENT_MANIFEST]:
+            pfn = parse_manifest if path == CLIENT_MANIFEST else parse
+            old = pfn(git_show(pack, old_ref, path))
+            new = pfn(git_show(pack, new_ref, path))
+            for k, v in new.items():
+                if k not in old:
+                    added.append((v["label"], v["side"]))
+                elif old[k]["version"] != v["version"]:
+                    updated.append((old[k]["label"], v["label"], v["side"],
+                                    old[k]["version"], v["version"]))
+            for k, v in old.items():
+                if k not in new:
+                    removed.append((v["label"], v["side"]))
 
-    print(f"# pack changelog from bundle diff  {old_ref}..{new_ref}\n")
+    cfg_changes, cfg_skipped = (config_changes(pack, old_ref, new_ref) if want_config else ([], 0))
+
+    scope = "config" if config_only else ("bundles" if not want_config else "bundles + config")
+    print(f"# pack changelog ({scope})  {old_ref}..{new_ref}\n")
     if updated:
         print("**mods updated**")
         for oldl, newl, side, oldv, newv in sorted(updated):
@@ -151,8 +299,9 @@ def main():
         for label, side in sorted(removed):
             print(f"* {label}{sidetag(side)}")
         print()
-    if not (added or updated or removed):
-        print("(no bundle changes between these refs)")
+    render_config(cfg_changes, cfg_skipped)
+    if not (added or updated or removed or cfg_changes or cfg_skipped):
+        print("(no bundle or config changes between these refs)")
 
 
 if __name__ == "__main__":
