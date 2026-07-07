@@ -149,6 +149,14 @@
       "options": { "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities" },
       "detail": "Pull GitHub Dependabot + code-scanning alerts across owned mods (is_mod). Fix at the ecosystem level (cargo/gradle bump). Needs gh authed. Run before a release.",
       "problemMatcher": []
+    },
+    {
+      "label": "Changelog: derive pending from git (per mod)",
+      "type": "shell",
+      "command": "python3 changelog_from_git.py",
+      "options": { "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities" },
+      "detail": "Each owned mod's commits since its last release tag = its pending changelog (the commit IS the source, so it can never be stale/missing). --markdown for changelog-pending format. Curate wording at release.",
+      "problemMatcher": []
     }
   ]
 }
