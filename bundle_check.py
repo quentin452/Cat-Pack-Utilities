@@ -128,6 +128,39 @@ def check_curse(entries, api_key):
     return problems
 
 
+# --- CurseForge manifest (the modpack's own files[]) --------------------------
+def check_manifest(bundle_dir, api_key):
+    """Validate src/client/manifest.json files[] — each must be Approved on CF.
+
+    Unlike bundle mods (mod-director fetches those via the CDN, tolerating odd API flags), the
+    manifest files[] are installed by the CurseForge LAUNCHER directly: a rejected/pending file
+    makes the whole modpack un-publishable/un-installable. This is what caught FileDirector fork9
+    (rejected: installs external files) after pack_sync bumped the manifest to it.
+    """
+    manifest = os.path.normpath(os.path.join(bundle_dir, "..", "..", "..", "client", "manifest.json"))
+    if not os.path.isfile(manifest):
+        return []   # e.g. checking an instance dir, not the pack source
+    with open(manifest, encoding="utf-8") as f:
+        files = json.load(f).get("files", [])
+    problems = []
+    headers = {"x-api-key": api_key}
+    for e in files:
+        pid, fid = e.get("projectID"), e.get("fileID")
+        if fid is None:
+            continue
+        try:
+            data = http_json(f"{CF_API}/v1/mods/{pid}/files/{fid}", headers=headers).get("data")
+        except Exception as ex:
+            # Rejected/deleted files often 404 on the read API.
+            problems.append((f"manifest file {pid}/{fid}", f"not retrievable on CF (rejected/deleted?): {ex}"))
+            continue
+        st = (data or {}).get("fileStatus")
+        if st != CF_APPROVED:
+            problems.append((f"manifest '{(data or {}).get('displayName')}' ({pid}/{fid})",
+                             f"NOT Approved on CF (fileStatus={st}) — the modpack would be rejected"))
+    return problems
+
+
 # --- URL ----------------------------------------------------------------------
 def check_one_url(url):
     for method in ("HEAD", "GET"):
@@ -235,15 +268,18 @@ def main():
     if url:
         print("[bundle-check] checking URLs...")
         problems += check_urls(url)
-    if curse and not args.urls_only:
+    if not args.urls_only:
         env = load_dotenv()
         key = env.get("CF_API_KEY")
         if not key:
             print("[bundle-check] WARN: CF_API_KEY absent — CurseForge checks skipped "
                   "(set it in .env.local or use --urls-only)")
         else:
-            print("[bundle-check] checking CurseForge files...")
-            problems += check_curse(curse, key)
+            if curse:
+                print("[bundle-check] checking CurseForge files...")
+                problems += check_curse(curse, key)
+            print("[bundle-check] checking CF manifest files[]...")
+            problems += check_manifest(args.dir, key)
 
     print("=" * 60)
     if problems:
