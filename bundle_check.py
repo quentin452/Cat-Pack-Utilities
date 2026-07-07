@@ -142,8 +142,9 @@ def check_one_url(url):
                     return None
                 return f"HTTP {code}"
         except urllib.error.HTTPError as ex:
-            if method == "HEAD" and ex.code in (403, 405, 501):
-                continue  # some hosts reject HEAD; retry with GET
+            if method == "HEAD":
+                continue  # HEAD is best-effort; GET below is authoritative (matches mod-director's
+                          # download). GitHub release assets 500 on HEAD but 200 on GET, e.g.
             return f"HTTP {ex.code}"
         except Exception as ex:
             if method == "HEAD":
