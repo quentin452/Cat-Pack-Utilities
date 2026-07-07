@@ -217,6 +217,16 @@
       },
       "detail": "Same gates, then FOR REAL: build zips + upload client+serverpack to CF (outward-publish) + prepend changelog. Push stays manual.",
       "problemMatcher": []
+    },
+    {
+      "label": "Pipeline: status (repo→release→CF→pack→instances)",
+      "type": "shell",
+      "command": "python3 pipeline_status.py",
+      "options": {
+        "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities"
+      },
+      "detail": "End-to-end delivery dashboard: unreleased commits per mod, CF latest file status, pack bundle refs, stale instance jars + NEXT ACTIONS. Read-only. Run at session start and before any release.",
+      "problemMatcher": []
     }
   ]
 }
