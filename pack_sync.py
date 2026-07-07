@@ -31,6 +31,7 @@ HUB = os.path.expanduser("~/Documents/GitHub/Mod-Sandbox")
 MANIFEST = f"{HUB}/memory/release-manifest.json"
 PACK = os.path.expanduser("~/Documents/GitHub/privates-minecraft-modpack/MODPACKS/Biggess Pack Cat Edition")
 CURSE_BUNDLE = f"{PACK}/src/common/config/mod-director/curse.bundle.json"
+URL_BUNDLE = f"{PACK}/src/common/config/mod-director/url.bundle.json"
 CLIENT_MANIFEST = f"{PACK}/src/client/manifest.json"
 SERVER_MODS = f"{PACK}/src/server/mods"
 CF_API = "https://api.curseforge.com"
@@ -114,6 +115,22 @@ def find_manifest_entry(project_id):
     return None
 
 
+def find_url_entry(match):
+    for e in _iter_dicts(json.load(open(URL_BUNDLE))):
+        if isinstance(e.get("url"), str) and match in e["url"]:
+            return e
+    return None
+
+
+def url_ok(url):
+    try:
+        req = urllib.request.Request(url, method="HEAD")
+        with urllib.request.urlopen(req, timeout=25) as r:
+            return r.status == 200, url
+    except Exception as e:
+        return False, f"{url} ({e})"
+
+
 def _iter_dicts(x):
     if isinstance(x, dict):
         yield x
@@ -165,6 +182,29 @@ def main():
             else:
                 replace_value(CLIENT_MANIFEST, f'"fileID": {e["fileID"]}', f'"fileID": {new_fid}',
                               f"{m['name']} client manifest fileID")
+
+        if "url_bundle" in delivery:
+            e = find_url_entry(pk["url_match"])
+            if not e:
+                problems.append(f"{m['name']}: no url.bundle entry matching {pk['url_match']!r}")
+            else:
+                old_url = e["url"]
+                mo = re.search(r"/releases/download/([^/]+)/", old_url)
+                old_ver, new_ver = (mo.group(1) if mo else None), m["version"]
+                if not old_ver:
+                    problems.append(f"{m['name']}: can't parse version from url {old_url}")
+                elif old_ver == new_ver:
+                    log(f"    = {m['name']} url.bundle already {new_ver}")
+                else:
+                    new_url = old_url.replace(old_ver, new_ver)
+                    replace_value(URL_BUNDLE, f'"url": "{old_url}"', f'"url": "{new_url}"',
+                                  f"{m['name']} url.bundle {old_ver}->{new_ver}")
+                    ok, u = url_ok(new_url)
+                    log(f"    {'OK' if ok else 'DEAD'} url.bundle target reachable: {new_url}")
+                    if not ok:
+                        problems.append(f"{m['name']}: new url.bundle URL not reachable: {u}")
+                # url.bundle is shared common config -> both client AND server fetch the same jar,
+                # so this single edit keeps client==server (the mismatch the smoke caught).
 
         if "server_jar" in delivery:
             src = os.path.expanduser(pk["server_jar_src"])
