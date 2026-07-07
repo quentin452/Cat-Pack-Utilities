@@ -70,9 +70,13 @@ def read_api_key():
 
 
 def verify(token, project_id, game_version):
-    """Pre-flight: upload token valid + game version resolvable + (if possible) project exists."""
-    vid = resolve_game_version_id(token, game_version)  # raises if token/version bad
-    print(f"[cf-verify] token OK, {game_version} -> id {vid}")
+    """Pre-flight: upload token valid + game version resolvable + (if possible) project exists.
+    game_version may be a comma-separated list (bootstrapper mods span many MC versions);
+    every name must resolve, mirroring the upload path."""
+    names = [v.strip() for v in game_version.split(",") if v.strip()]
+    vids = [resolve_game_version_id(token, n) for n in names]  # raises if token/any version bad
+    print(f"[cf-verify] token OK, {len(vids)} version(s) resolved: " +
+          ", ".join(f"{n}->{i}" for n, i in zip(names, vids)))
     if project_id:
         key = read_api_key()
         if key:
