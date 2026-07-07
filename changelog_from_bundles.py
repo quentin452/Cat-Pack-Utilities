@@ -261,6 +261,16 @@ def main():
         sys.exit("usage: changelog_from_bundles.py <old_ref> [new_ref] "
                  "[--no-config|--config-only] [--pack <dir>]")
     old_ref, new_ref = args[0], (args[1] if len(args) > 1 else "HEAD")
+    # accept git range syntax "old..new" as the single positional
+    if ".." in old_ref and len(args) == 1:
+        old_ref, _, new_ref = old_ref.partition("..")
+        new_ref = new_ref.lstrip(".") or "HEAD"
+    # fail LOUD on unresolvable refs: a silently-empty old side reads as "everything added"
+    for ref in (old_ref, new_ref):
+        if subprocess.run(["git", "-C", pack, "rev-parse", "--verify", "--quiet", ref + "^{commit}"],
+                          stdout=subprocess.DEVNULL).returncode != 0:
+            sys.exit(f"error: ref {ref!r} does not resolve in {pack} — refusing to diff "
+                     "(a bad ref would report the whole bundle as added)")
 
     added, updated, removed = [], [], []
     if not config_only:

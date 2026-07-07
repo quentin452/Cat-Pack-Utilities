@@ -3,7 +3,7 @@
 inventory to Mod-Sandbox/memory/repos.json — the SINGLE source of truth for "which forks/mods
 do I own". The git remotes are the ground truth (a fork = has an `upstream` remote), so this
 inventory is derived, never hand-maintained: no more duplicating the fork list across
-pipeline-mods.md / release-manifest.json / changelog-pending.md.
+pipeline-mods.md / release-manifest.json.
 
 Usage:
   python3 scan_repos.py            # rewrite memory/repos.json

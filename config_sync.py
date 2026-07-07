@@ -7,7 +7,7 @@ pack_sync=mod fileIDs, bundle_check=fetchability — NONE touch game config.
 Workflow for a config change (perf tune / fix, e.g. CoFH ore density, BoP feature):
   1. edit the CANONICAL: privates-minecraft-modpack/MODPACKS/<pack>/src/common/config  (NEVER the instance)
   2. this tool: mirror canonical -> instances, validate in-game
-  3. changelog-pending Pack section: **config updated**  +  bump pack version
+  3. commit the config change with a good message (config(scope): ...) — that commit IS the changelog entry (changelog_from_bundles.py derives it)  +  bump pack version
   4. ship: generate_modpack_zips packages src/common/config -> overrides/config (client AND serverpack)
 
   config_sync.py                         # DIFF: files where an instance differs from canonical
@@ -89,7 +89,7 @@ def main():
     if not args.apply and grand:
         print("\nRun with --apply to mirror canonical -> instances, then validate in-game.")
     if args.apply:
-        print("\nDone. Next: changelog-pending **config updated** + bump version + generate_modpack_zips to ship.")
+        print("\nDone. Next: commit the canonical config change (config(scope): ... message = the changelog entry) + bump version + generate_modpack_zips to ship.")
 
 
 if __name__ == "__main__":

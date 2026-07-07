@@ -63,23 +63,23 @@
       "problemMatcher": []
     },
     {
-      "label": "Pack: publish pending changelog (preview)",
+      "label": "Pack: publish changelog (derive→preview)",
       "type": "shell",
-      "command": "python3 changelog_publish.py",
+      "command": "python3 changelog_publish.py --derive ${input:changelogBaseline} --version ${input:packVersion}",
       "options": {
         "cwd": "${env:HOME}/Documents/GitHub/privates-minecraft-modpack"
       },
-      "detail": "Preview cutting memory/changelog-pending.md into the pack CHANGELOG. Add --prepend to actually insert.",
+      "detail": "Derive (bundles+config since baseline) → preview the publish-ready block. For curated wording: derive to a file, edit it, then changelog_publish.py --from-derive <file>.",
       "problemMatcher": []
     },
     {
-      "label": "Pack: publish pending changelog (PREPEND)",
+      "label": "Pack: publish changelog (derive→PREPEND)",
       "type": "shell",
-      "command": "python3 changelog_publish.py --prepend",
+      "command": "python3 changelog_publish.py --derive ${input:changelogBaseline} --version ${input:packVersion} --prepend",
       "options": {
         "cwd": "${env:HOME}/Documents/GitHub/privates-minecraft-modpack"
       },
-      "detail": "Insert the pending block into the pack CHANGELOG for real.",
+      "detail": "Insert the derived block into the pack CHANGELOG for real (uncurated — prefer --from-derive with a curated file for player-facing wording).",
       "problemMatcher": []
     },
     {
@@ -159,16 +159,6 @@
       "problemMatcher": []
     },
     {
-      "label": "Track: audit untracked mod changes",
-      "type": "shell",
-      "command": "python3 track_audit.py",
-      "options": {
-        "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities"
-      },
-      "detail": "Safety net: owned mods with unpushed commits but no changelog-pending entry (esp. agent edits that can't touch the hub). Run before wrapping a session / a release.",
-      "problemMatcher": []
-    },
-    {
       "label": "Security: GitHub alerts across mods",
       "type": "shell",
       "command": "python3 security_audit.py",
@@ -179,13 +169,13 @@
       "problemMatcher": []
     },
     {
-      "label": "Changelog: derive pending from git (per mod)",
+      "label": "Changelog: derive from git (per mod)",
       "type": "shell",
       "command": "python3 changelog_from_git.py",
       "options": {
         "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities"
       },
-      "detail": "Each owned mod's commits since its last release tag = its pending changelog (the commit IS the source, so it can never be stale/missing). --markdown for changelog-pending format. Curate wording at release.",
+      "detail": "Each owned mod's commits since its last release tag = its pending changelog (the commit IS the source, so it can never be stale/missing). --markdown for release-notes format. Curate wording at release.",
       "problemMatcher": []
     },
     {

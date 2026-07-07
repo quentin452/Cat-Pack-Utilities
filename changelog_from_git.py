@@ -8,7 +8,7 @@ Same principle as changelog_from_bundles.py (pack changelog from the bundle git-
   changelog_from_git.py --repo OptimizationsAndTweaks
   changelog_from_git.py --all            # every owned repo (is_fork), not just is_mod
   changelog_from_git.py --raw            # include chore/test/docs/etc (dropped by default)
-  changelog_from_git.py --markdown       # emit changelog-pending-style sections (curate at release)
+  changelog_from_git.py --markdown       # emit release-notes-style sections (curate at release)
 
 Model: write good commit messages (English, conventional feat/fix/perf/security) and the changelog
 falls out of git. This report is the COMPLETE pending set; curate the wording into the PUBLISHED
@@ -48,7 +48,7 @@ def main():
     ap.add_argument("--repo", default=None)
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--raw", action="store_true", help="include chore/test/docs/etc")
-    ap.add_argument("--markdown", action="store_true", help="emit changelog-pending-style bullets")
+    ap.add_argument("--markdown", action="store_true", help="emit release-notes-style bullets")
     args = ap.parse_args()
 
     if not os.path.exists(REPOS):
