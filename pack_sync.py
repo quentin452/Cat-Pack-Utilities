@@ -143,7 +143,45 @@ def _iter_dicts(x):
             yield from _iter_dicts(v)
 
 
+def audit():
+    """Read-only freshness check: every quentin452 GitHub-delivered mod in url.bundle vs its latest
+    GitHub release tag. Flags bundle-older-than-latest. NOTE: multi-asset repos (one repo, many mods,
+    each its own tag — e.g. Familiars-API, Biggess-Pack-Cat-Edition-Mods) produce false positives
+    because `gh release view` returns only the newest tag; treat those as signal, not gospel."""
+    import re as _re
+    import subprocess
+    data = open(URL_BUNDLE, encoding="utf-8", errors="replace").read()
+    seen = {}
+    for m in _re.finditer(r"quentin452/([A-Za-z0-9._-]+)/releases/download/([^/\"]+)", data):
+        repo, tag = m.group(1), m.group(2)
+        if repo == "Biggess-Pack-Cat-Edition-Mods":
+            continue  # content mega-repo: per-asset tags, not comparable
+        seen.setdefault(repo, set()).add(tag)
+    print(f"=== pack freshness audit — {len(seen)} quentin452 fork repos in url.bundle ===")
+    stale = []
+    for repo in sorted(seen):
+        r = subprocess.run(["gh", "release", "view", "-R", f"quentin452/{repo}",
+                            "--json", "tagName", "-q", ".tagName"], capture_output=True, text=True)
+        latest = r.stdout.strip()
+        if not latest:
+            continue
+        tags = seen[repo]
+        if latest not in tags:
+            multi = len(tags) > 1
+            stale.append((repo, sorted(tags), latest, multi))
+    if not stale:
+        print("  all bundle versions match latest release.")
+        return
+    for repo, tags, latest, multi in stale:
+        note = "  (multi-tag repo — likely FALSE POSITIVE)" if multi else ""
+        print(f"  STALE  {repo}: bundle={','.join(tags)}  latest={latest}{note}")
+    print("\nReview each: single-tag repos = real; multi-tag = verify (per-sub-mod tags are intentional).")
+
+
 def main():
+    if "--audit" in sys.argv:
+        audit()
+        return
     key = load_api_key()
     mods = json.load(open(MANIFEST))["mods"]
     pack_mods = [m for m in mods if m.get("pack")]
