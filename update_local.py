@@ -98,6 +98,9 @@ def main():
         if m["name"] in SKIP_LOCAL:
             print(f"{m['name']}: SKIP (special — updated via pack repo + CF, not a local swap)\n")
             continue
+        if "jar_glob" not in m:
+            print(f"{m['name']}: SKIP (pack-delivery-only entry, no local build)\n")
+            continue
         jar = newest_jar(m["repo"], m)
         print(f"{m['name']}: {os.path.basename(jar) if jar else 'NO BUILT JAR (build it first)'}")
         if not jar:
