@@ -15,6 +15,7 @@ Usage:
   cf_upload.py --list-versions                                                   # print 1.7.10 game version id
 """
 
+import re
 import argparse
 import json
 import os
@@ -93,14 +94,38 @@ def verify(token, project_id, game_version):
             print(f"[cf-verify] project {project_id} existence not checked (no CF_API_KEY read key)")
 
 
+_VERSIONS_CACHE = None
+_MC_TYPE_IDS = None
+
+
+def _mc_type_ids(token):
+    """CF game-version type ids that are real Minecraft-java version groups ('Minecraft 1.7',
+    'Minecraft 1.8', ...). CF reuses version names like '1.8' across OTHER types (e.g. 'Addons',
+    Bukkit) whose ids the upload API rejects as 'invalid dependency' (error 1009)."""
+    global _MC_TYPE_IDS
+    if _MC_TYPE_IDS is None:
+        vt = api_get("/api/game/version-types", token)
+        _MC_TYPE_IDS = {t["id"] for t in vt if re.match(r"^Minecraft \d", str(t.get("name", "")))}
+    return _MC_TYPE_IDS
+
+
 def resolve_game_version_id(token, name):
-    """Return the numeric CF game-version id for e.g. '1.7.10'."""
-    versions = api_get("/api/game/versions", token)
-    # The endpoint returns groups of versions; each has {name, id, ...}. Flatten and match.
-    for v in _flatten_versions(versions):
-        if str(v.get("name")) == name:
+    """Return the numeric CF game-version id for e.g. '1.7.10', preferring the real Minecraft-java
+    version type (see _mc_type_ids)."""
+    global _VERSIONS_CACHE
+    if _VERSIONS_CACHE is None:  # the endpoint refetches are expensive; cache the flattened list
+        _VERSIONS_CACHE = list(_flatten_versions(api_get("/api/game/versions", token)))
+    mc = _mc_type_ids(token)
+    hits = [v for v in _VERSIONS_CACHE if str(v.get("name")) == name]
+    if not hits:
+        raise SystemExit(f"game version {name!r} not found via /api/game/versions")
+    for v in hits:
+        if v.get("gameVersionTypeID") in mc:
             return v.get("id")
-    raise SystemExit(f"game version {name!r} not found via /api/game/versions")
+    # No Minecraft-java type matched (only foreign types like Addons): fall back to the first hit
+    # but warn — better than silently sending an id the upload API will 400 on.
+    print(f"[cf-upload] WARN: '{name}' has no Minecraft-java version type; using id {hits[0].get('id')}")
+    return hits[0].get("id")
 
 
 def _flatten_versions(obj):
@@ -150,8 +175,13 @@ def upload(project_id, file_path, metadata, token, dry_run):
     req = urllib.request.Request(url, data=body, method="POST")
     req.add_header("X-Api-Token", token)
     req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
-    with urllib.request.urlopen(req, timeout=120) as r:
-        resp = json.load(r)
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            resp = json.load(r)
+    except urllib.error.HTTPError as e:
+        body_txt = e.read().decode("utf-8", "replace")
+        print(f"[cf-upload] HTTP {e.code} {e.reason} — response body:\n{body_txt}")
+        raise
     print(f"[cf-upload] OK — file id: {resp.get('id')}")
 
 
