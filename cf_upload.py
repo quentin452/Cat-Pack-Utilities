@@ -195,6 +195,9 @@ def main():
     ap.add_argument("--changelog", default="")
     ap.add_argument("--changelog-file")
     ap.add_argument("--changelog-type", default="markdown", choices=["text", "html", "markdown"])
+    ap.add_argument("--parent-file-id", type=int,
+                    help="attach as an additional file (e.g. a server pack) of this main file id; "
+                         "game versions are inherited from the parent and must NOT be sent")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--list-versions", action="store_true",
                     help="just print the game-version id and exit (token check)")
@@ -222,17 +225,21 @@ def main():
     if args.changelog_file:
         changelog = open(args.changelog_file, encoding="utf-8").read()
 
-    # --game-version accepts a comma-separated list. Special mods (e.g. the mod-director bootstrapper,
-    # which is version-agnostic) must be tagged with ALL supported MC versions, not just 1.7.10, or
-    # they're undiscoverable on other versions and inconsistent with prior files.
-    names = [v.strip() for v in args.game_version.split(",") if v.strip()]
-    version_ids = [resolve_game_version_id(token, n) for n in names]
     metadata = {
         "changelog": changelog,
         "changelogType": args.changelog_type,
-        "gameVersions": version_ids,
         "releaseType": args.release_type,
     }
+    if args.parent_file_id:
+        # Additional file (server pack): CF derives its game versions from the parent file,
+        # so gameVersions must be OMITTED (sending them is rejected).
+        metadata["parentFileID"] = args.parent_file_id
+    else:
+        # --game-version accepts a comma-separated list. Version-agnostic files (e.g. the
+        # mod-director bootstrapper) must carry ALL supported MC versions, else they're
+        # undiscoverable on other versions and inconsistent with prior files.
+        names = [v.strip() for v in args.game_version.split(",") if v.strip()]
+        metadata["gameVersions"] = [resolve_game_version_id(token, n) for n in names]
     if args.display_name:
         metadata["displayName"] = args.display_name
 
