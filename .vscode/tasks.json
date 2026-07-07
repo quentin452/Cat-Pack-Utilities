@@ -117,6 +117,30 @@
       "command": "python3 cf_upload.py --verify --project-id 855466 && python3 modrinth_upload.py --verify",
       "detail": "Check the upload tokens are valid before a release.",
       "problemMatcher": []
+    },
+    {
+      "label": "Config: diff canonical vs instances",
+      "type": "shell",
+      "command": "python3 config_sync.py",
+      "options": { "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities" },
+      "detail": "Preview game-config drift: canonical src/common/config vs TEST+server. A config CHANGE is edited in the CANONICAL (never the instance directly). Add --only <path> manually to scope.",
+      "problemMatcher": []
+    },
+    {
+      "label": "Config: APPLY canonical -> instances",
+      "type": "shell",
+      "command": "python3 config_sync.py --apply",
+      "options": { "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities" },
+      "detail": "Copy canonical config -> TEST+server (CRLF-safe). AFTER: changelog **config updated** + bump version + generate zips to ship client+server.",
+      "problemMatcher": []
+    },
+    {
+      "label": "Track: audit untracked mod changes",
+      "type": "shell",
+      "command": "python3 track_audit.py",
+      "options": { "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities" },
+      "detail": "Safety net: owned mods with unpushed commits but no changelog-pending entry (esp. agent edits that can't touch the hub). Run before wrapping a session / a release.",
+      "problemMatcher": []
     }
   ]
 }
