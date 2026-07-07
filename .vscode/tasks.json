@@ -197,6 +197,26 @@
       },
       "detail": "Drive /spark profiler via matoulib RPC (game must be up, -Dmatoulib.rpc=true). Saves .sparkprofile locally — NEVER uploads (spark.lucko.me = public).",
       "problemMatcher": []
+    },
+    {
+      "label": "Pack: RELEASE dry-run (gates+plan)",
+      "type": "shell",
+      "command": "python3 release_pack.py --version ${input:packVersion} --baseline ${input:changelogBaseline}",
+      "options": {
+        "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities"
+      },
+      "detail": "Gated pack release DRY-RUN (read-only): tree clean + pack_sync consistency (Approved-only) + fork audit + bundle_check (fetchable/Approved) + changelog preview. Baseline = commit of the LAST PUBLISHED version.",
+      "problemMatcher": []
+    },
+    {
+      "label": "Pack: RELEASE EXECUTE (uploads to CF!)",
+      "type": "shell",
+      "command": "python3 release_pack.py --version ${input:packVersion} --baseline ${input:changelogBaseline} --execute",
+      "options": {
+        "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities"
+      },
+      "detail": "Same gates, then FOR REAL: build zips + upload client+serverpack to CF (outward-publish) + prepend changelog. Push stays manual.",
+      "problemMatcher": []
     }
   ]
 }

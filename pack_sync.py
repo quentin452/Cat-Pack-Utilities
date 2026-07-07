@@ -204,6 +204,17 @@ def main():
         new_disp = info.get("displayName")  # carries the -forkN (the CF fileName often doesn't)
         log(f"[{m['name']}] delivery={delivery} cf_file={new_fid} fileName={new_fn} display={new_disp}")
 
+        # BUG-023 guard: NEVER write a non-Approved fileID into the pack. fileStatus 4 = Approved is
+        # the only value safe to ship — a Rejected/pending file in the client manifest gets the whole
+        # modpack rejected at CF review (fork9 8386799 did exactly that). Only enforceable with the
+        # read API; without a key we already warned above.
+        if new_fid and info and ("curse_bundle" in delivery or "client_manifest" in delivery):
+            if info.get("fileStatus") != 4:
+                problems.append(f"{m['name']}: cf_file_id {new_fid} fileStatus="
+                                f"{info.get('fileStatus')} (NOT Approved) — refusing to sync it")
+                log("    ⛔ SKIP: target file is not Approved on CF (see release-manifest _pin note)")
+                continue
+
         if "curse_bundle" in delivery:
             e = find_curse_entry(pid)
             if not e:
