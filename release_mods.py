@@ -45,6 +45,7 @@ sys.path.insert(0, SCRIPT_DIR)
 import make_minimal_instance as mmi  # noqa: E402 — reuse poll_boot/kill_instance/INSTANCES/JAVA
 from modrinth_upload import normalize_modrinth_version  # noqa: E402 — CONCERN B: shared strip-V
 from changelog_from_git import commit_type  # noqa: E402 — shared conventional-commit type classifier
+import release_log  # noqa: E402 — append-only release-log.md logger (never throws)
 
 CF_READ_API = "https://api.curseforge.com"       # read API (CF_API_KEY) — existence checks only
 MODRINTH_API = "https://api.modrinth.com/v2"
@@ -641,22 +642,116 @@ def boot_verify(mod, jar, execute, skip_boot, log):
     return ok
 
 
-def release_one(mod, execute, skip_build, changelog_override=None, force_cf=False,
-                force_modrinth=False, cf_api_key=None, skip_boot=False):
+def verify_one(mod, skip_build, skip_boot):
+    """--verify: run the SAME local checks the pre-upload path runs (stage1 + build + boot-verify),
+    LOG each as a gate to release-log.md (mode=VERIFY), then STOP. This function contains NO tag /
+    push / gh / cf_upload / modrinth code at all: it CANNOT reach an upload by construction — it is
+    the local build/test/audit, fully separated from the outward publish.
+
+    It actually builds (honoring --skip-build) and actually boots the boot-verify gate (honoring
+    --skip-boot) — it is the real local audit, not just a plan print (dry-run already prints plans).
+    Returns True if every executed gate passed. Never uploads/tags/pushes under any argument."""
     name = mod["name"]
     repo = os.path.expanduser(mod["repo"])
     log = lambda m: print(f"  [{name}] {m}")
 
     if not os.path.isdir(os.path.join(repo, ".git")):
+        print(f"=== {name}  [VERIFY] ===")
+        log(f"SKIP: not a git repo: {repo}")
+        rl = release_log.open_run(name, mod.get("version") or "?", "VERIFY", repo=repo)
+        rl.gate("git-repo", False, "not a git repo")
+        rl.finish("SKIP", f"not a git repo: {repo}")
+        return False
+
+    version, skip_reason = resolve_version(mod, repo, log)
+    rl = release_log.open_run(name, version or (mod.get("version") or "?"), "VERIFY", repo=repo)
+    if skip_reason:
+        print(f"=== {name}  ->  (up to date)  [VERIFY] ===")
+        log(skip_reason + " — SKIP")
+        rl.gate("resolve-version", None, skip_reason)
+        rl.finish("SKIP", "up to date — nothing to verify")
+        return True
+    print(f"=== {name}  ->  {version}  [VERIFY] ===")
+
+    ok = True
+
+    # Stage-1: tree/branch/upstream + upload-target reachability (read-only probes; NEVER uploads).
+    try:
+        s_ok, s_msgs = stage1_checks(mod)
+    except Exception as e:
+        s_ok, s_msgs = False, [f"error: {e}"]
+    rl.gate("stage1 (tree/branch/upstream+targets)", s_ok, "; ".join(s_msgs))
+    log(f"stage1: {'OK' if s_ok else 'FAIL'}" + (f" ({'; '.join(s_msgs)})" if s_msgs else ""))
+    ok = ok and s_ok
+
+    # Build (local compile) — honor --skip-build. NO tagging here (tagging is an upload-path step).
+    if skip_build:
+        log("build skipped (--skip-build)")
+        rl.gate("build", None, "--skip-build")
+    else:
+        env = dict(os.environ)
+        jh = mod["build"].get("java_home")
+        if jh:
+            env["JAVA_HOME"] = jh
+        log(f"build pass: {' '.join(mod['build']['cmd'])}" + (f"  (JAVA_HOME={jh})" if jh else ""))
+        code, out = build_run(mod["build"]["cmd"], cwd=repo, env=env)
+        b_ok = code == 0
+        if not b_ok:
+            for ln in out.splitlines()[-8:]:
+                print(f"      {ln}")
+        rl.gate("build", b_ok, "green + jar" if b_ok else f"gradle exit {code}")
+        log("build " + ("OK" if b_ok else "FAILED"))
+        ok = ok and b_ok
+
+    # Locate the jar (best-effort — boot-verify needs it; a missing jar is a note, not a hard fail).
+    jar = None
+    try:
+        jar = find_jar(repo, mod)
+        log(f"jar: {os.path.basename(jar)}")
+    except RuntimeError as e:
+        log(f"[verify] note: {e}")
+
+    # Boot-verify — actually boots (execute=True) unless --skip-boot / no boot_test. NEVER publishes.
+    if skip_boot:
+        boot_verify(mod, jar, True, True, log)  # logs the SKIPPED line
+        rl.gate("boot-verify", None, "--skip-boot")
+    elif not mod.get("boot_test"):
+        boot_verify(mod, jar, True, False, log)  # logs the no-boot_test SKIP reason
+        rl.gate("boot-verify", None, "no boot_test block")
+    else:
+        bv_ok = boot_verify(mod, jar, True, False, log)
+        rl.gate("boot-verify", bv_ok, "booted + scanned")
+        ok = ok and bv_ok
+
+    outcome = "VERIFY PASS" if ok else "VERIFY FAIL"
+    rl.finish(outcome, "local build/test/audit only — no tag/push/upload (--verify)")
+    log(outcome + " — stopped before any publish (--verify never uploads)")
+    return ok
+
+
+def release_one(mod, execute, skip_build, changelog_override=None, force_cf=False,
+                force_modrinth=False, cf_api_key=None, skip_boot=False):
+    name = mod["name"]
+    repo = os.path.expanduser(mod["repo"])
+    log = lambda m: print(f"  [{name}] {m}")
+    mode = "UPLOAD" if execute else "DRY-RUN"  # release-log mode for THIS run
+
+    if not os.path.isdir(os.path.join(repo, ".git")):
         print(f"=== {name} ===")
         log(f"SKIP: not a git repo: {repo}")
+        rl = release_log.open_run(name, mod.get("version") or "?", mode, repo=repo)
+        rl.gate("git-repo", False, "not a git repo")
+        rl.finish("SKIP", f"not a git repo: {repo}")
         return False
 
     # Auto-version (CONCERN A): derive the NEXT version from git tags, not the stale manifest literal.
     version, skip_reason = resolve_version(mod, repo, log)
+    rl = release_log.open_run(name, version or (mod.get("version") or "?"), mode, repo=repo)
     if skip_reason:
         print(f"=== {name}  ->  (up to date) ===")
         log(skip_reason + " — SKIP")
+        rl.gate("resolve-version", None, skip_reason)
+        rl.finish("SKIP", "up to date — nothing to release")
         return True
     print(f"=== {name}  ->  {version} ===")
 
@@ -664,19 +759,26 @@ def release_one(mod, execute, skip_build, changelog_override=None, force_cf=Fals
     dirty = dirty_paths(repo, mod.get("ignore_dirty", []))
     if dirty:
         log(f"SKIP: working tree not clean: {', '.join(dirty[:5])}")
+        rl.gate("clean-tree", False, ", ".join(dirty[:5]))
+        rl.finish("FAIL", "working tree not clean")
         return False
 
     # Gate 2: expected branch
     cur = git(repo, "rev-parse", "--abbrev-ref", "HEAD")
     if cur != mod["branch"]:
         log(f"SKIP: on branch '{cur}', expected '{mod['branch']}'")
+        rl.gate("branch", False, f"on '{cur}', expected '{mod['branch']}'")
+        rl.finish("FAIL", "wrong branch")
         return False
 
     # Gate 3: push pass
     up, code = run(["git", "-C", repo, "rev-parse", "--abbrev-ref", "@{u}"], check=False)
     if code != 0:
         log("SKIP: no upstream configured (push -u once first)")
+        rl.gate("upstream", False, "no upstream configured")
+        rl.finish("FAIL", "no upstream")
         return False
+    rl.gate("preflight (tree/branch/upstream)", True)
     ahead = git(repo, "rev-list", "--count", "@{u}..HEAD")
     if ahead != "0":
         if execute:
@@ -711,6 +813,7 @@ def release_one(mod, execute, skip_build, changelog_override=None, force_cf=Fals
     # Gate 5: compile/build pass
     if skip_build:
         log("build skipped (--skip-build)")
+        rl.gate("build", None, "--skip-build")
     else:
         env = dict(os.environ)
         jh = mod["build"].get("java_home")
@@ -724,8 +827,11 @@ def release_one(mod, execute, skip_build, changelog_override=None, force_cf=Fals
                 print(f"      {ln}")
             if tag_created:
                 git(repo, "tag", "-d", version, check=False)
+            rl.gate("build", False, f"gradle exit {code}")
+            rl.finish("FAIL", "build failed")
             return False
         log("build OK")
+        rl.gate("build", True, "green + jar")
 
     # Locate jar (best-effort in dry-run: build may not have run with a clean tag name)
     try:
@@ -734,6 +840,8 @@ def release_one(mod, execute, skip_build, changelog_override=None, force_cf=Fals
     except RuntimeError as e:
         log(f"{'SKIP' if execute else '[dry-run] note'}: {e}")
         if execute:
+            rl.gate("jar", False, str(e))
+            rl.finish("FAIL", "no jar located")
             return False
         jar = None
 
@@ -745,7 +853,13 @@ def release_one(mod, execute, skip_build, changelog_override=None, force_cf=Fals
         if tag_created:  # FIX 1: don't let a boot-verify fail leave a tag that masks the mod as shipped
             git(repo, "tag", "-d", version, check=False)
             log(f"rolled back tag {version} (boot-verify failed — re-run re-derives + retries)")
+        rl.gate("boot-verify", False, "mixin-apply / attributed fatal")
+        rl.finish("FAIL", "boot-verify failed")
         return False
+    _bv_skipped = skip_boot or not mod.get("boot_test")
+    rl.gate("boot-verify", None if _bv_skipped else True,
+            "--skip-boot" if skip_boot else ("no boot_test block" if not mod.get("boot_test")
+                                             else "booted + scanned"))
 
     # Changelog = commits since previous tag. Format as a markdown bullet list: raw subject lines
     # separated by single newlines collapse into ONE paragraph in markdown (CF/Modrinth/GitHub all
@@ -766,6 +880,8 @@ def release_one(mod, execute, skip_build, changelog_override=None, force_cf=Fals
     # (no duplicate GitHub release / CF file / Modrinth version) instead of erroring or duplicating.
     slug = origin_slug(repo)
     plan = publish_plan(mod, version, slug, cf_api_key, force_cf, force_modrinth)
+    plan_summary = "; ".join(f"{t}={a}" for t, (a, _) in plan.items())
+    rl.gate("publish-plan (idempotency)", True, plan_summary)
 
     if not execute:
         for tgt, (action, note) in plan.items():
@@ -775,10 +891,12 @@ def release_one(mod, execute, skip_build, changelog_override=None, force_cf=Fals
                 log(f"[dry-run] would re-upload {tgt} asset" + (f" ({note})" if note else ""))
             else:
                 log(f"[dry-run] {tgt}: already released — would skip" + (f" ({note})" if note else ""))
+        rl.finish("DRY-RUN", f"plan: {plan_summary}")
         return True
 
     if all(action == "skip" for action, _ in plan.values()):
         log(f"already fully released — nothing to publish ({version})")
+        rl.finish("SKIP", f"already fully released ({version})")
         return True
 
     # --- real publish (only the targets that are actually missing) ---
@@ -842,9 +960,11 @@ def release_one(mod, execute, skip_build, changelog_override=None, force_cf=Fals
         if tag_created:
             git(repo, "tag", "-d", version, check=False)
             log(f"rolled back tag {version} (a publish leg failed — re-run retries the missing leg)")
+        rl.finish("ERROR", "a publish leg raised — tag rolled back if newly created")
         raise
     finally:
         os.unlink(notes)
+    rl.finish("UPLOADED", f"published {version}: {plan_summary}")
     return True
 
 
@@ -853,6 +973,10 @@ def main():
     ap.add_argument("--manifest", default=MANIFEST)
     ap.add_argument("--only", help="release only this mod name")
     ap.add_argument("--execute", action="store_true", help="actually tag/push/publish (default: dry-run)")
+    ap.add_argument("--verify", action="store_true",
+                    help="LOCAL BUILD/TEST/AUDIT ONLY: run stage1 + build + boot-verify per mod, log "
+                         "each gate to release-log.md (mode=VERIFY), then STOP. NEVER tags/pushes/"
+                         "uploads. Wins over --execute if both are passed (no upload can happen).")
     ap.add_argument("--skip-build", action="store_true", help="trust an existing build")
     ap.add_argument("--skip-boot", action="store_true",
                     help="bypass the boot-verify gate (mixin apply-time check). Default: gate ON "
@@ -887,6 +1011,25 @@ def main():
             sys.exit(f"--changelog-file {args.changelog_file} is empty")
 
     cf_api_key = read_env("CF_API_KEY")  # read key (never printed) — for the CF existence probe
+
+    # --verify: local build/test/audit ONLY. Dispatched BEFORE Stage 1/2 and returns here, so
+    # release_one() (the only path that tags/pushes/uploads) is NEVER reached. --verify wins over
+    # --execute by construction — there is no code path from this branch to a publish.
+    if args.verify:
+        if args.execute:
+            print("note: --verify wins over --execute — running a LOCAL AUDIT ONLY, no upload.\n")
+        print(f"===== release_mods [VERIFY] — {len(mods)} mod(s) (local audit; NEVER uploads) =====\n")
+        allok = True
+        for m in mods:
+            try:
+                if not verify_one(m, args.skip_build, args.skip_boot):
+                    allok = False
+            except Exception as e:
+                print(f"  [{m['name']}] ERROR: {e}")
+                allok = False
+            print()
+        print("===== VERIFY complete (release-log.md updated) — NOTHING was tagged/pushed/uploaded =====")
+        sys.exit(0 if allok else 1)
 
     mode = "EXECUTE" if args.execute else "DRY-RUN"
     print(f"===== release_mods [{mode}] — {len(mods)} mod(s) =====\n")

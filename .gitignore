@@ -16,3 +16,4 @@ Catpackutilities/utilities/package_report_raw.txt
 Catpackutilities/utilities/package_report_wildcard.txt
 .env.local
 .mixin_collision_cache.json
+release-log.md

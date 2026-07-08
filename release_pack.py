@@ -53,6 +53,8 @@ import urllib.request
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import release_log  # noqa: E402 — append-only release-log.md logger (never throws)
 CF_READ_API = "https://api.curseforge.com"
 PACK_REPO = Path.home() / "Documents/GitHub/privates-minecraft-modpack"
 PACK_DIR = PACK_REPO / "MODPACKS/Biggess Pack Cat Edition"
@@ -495,6 +497,71 @@ def drift_gate(strict):
           "to hard-fail here.)")
 
 
+def _run_gates(args, rl):
+    """Run GATES 1–7 (the local audit) and record each to the release-log run `rl`. Behavior is
+    UNCHANGED from the previous inline block: a hard-fail gate still sys.exit()s (the caller logs the
+    FAIL entry). Opt-in gates (4b/4c/3/6/7) are logged as SKIPPED when their flag is off."""
+    # GATE 1 — clean tree (the zip build bumps version files; a dirty tree muddles the release commit)
+    dirty = subprocess.run(["git", "-C", str(PACK_REPO), "status", "--porcelain"],
+                           capture_output=True, text=True).stdout.strip()
+    if dirty:
+        rl.gate("GATE 1 clean-tree", False, "working tree not clean")
+        sys.exit(f"⛔ GATE 1: pack repo working tree not clean:\n{dirty}\n— commit/stash first.")
+    print("=== GATE 1: pack repo tree clean ✓")
+    rl.gate("GATE 1 clean-tree", True)
+
+    # GATE 2 — pack config consistency + Approved-only fileIDs. --check makes pack_sync exit non-zero
+    # on PENDING (would-change but unapplied) fileID edits, so a manifest fileID bumped-but-not-applied
+    # FAILS the gate instead of packaging zips with the stale OLD fileIDs.
+    run([sys.executable, HERE / "pack_sync.py", "--check"], "GATE 2 (pack_sync consistency)")
+    rl.gate("GATE 2 pack_sync consistency", True)
+
+    # GATE 3 — personal fork bundles not stale vs their GitHub releases
+    if args.skip_audit:
+        print("\n=== GATE 3: SKIPPED (--skip-audit)")
+        rl.gate("GATE 3 fork-staleness audit", None, "--skip-audit")
+    else:
+        run([sys.executable, HERE / "pack_sync.py", "--audit"], "GATE 3 (fork staleness audit)")
+        rl.gate("GATE 3 fork-staleness audit", True)
+
+    # GATE 4 — every shipped mod fetchable + manifest files[] Approved
+    run([sys.executable, HERE / "bundle_check.py"], "GATE 4 (bundle fetchability + manifest Approved)")
+    rl.gate("GATE 4 bundle fetchability", True)
+
+    # GATE 4b — OPT-IN boot-verify: the pack must actually BOOT (mixins applied, no crash)
+    if args.boot_verify:
+        pack_boot_verify()
+        rl.gate("GATE 4b boot-verify", True, "booted + scanned")
+    else:
+        print("\n=== GATE 4b (boot-verify): SKIPPED (pass --boot-verify to boot the pack + scan)")
+        rl.gate("GATE 4b boot-verify", None, "not requested (opt-in)")
+
+    # GATE 4c — OPT-IN smoke: the SHIPPED binaries must boot a server (+client) clean (hole #3)
+    smoke_gate(args)
+    rl.gate("GATE 4c smoke", True if args.smoke else None,
+            "server smoke PASS" if args.smoke else "not requested (opt-in)")
+
+    # GATE 5 — config drift (CONCERN C): canonical config is what ships; report/enforce drift
+    config_gate(args.strict_config)
+    rl.gate("GATE 5 config-drift", True, "strict" if args.strict_config else "report-only")
+
+    # GATE 6 — third-party staleness (CONCERN C): Approved updates for bundled third-party mods
+    if args.skip_modcheck:
+        print("\n=== GATE 6 (third-party staleness): SKIPPED (--skip-modcheck)")
+        rl.gate("GATE 6 third-party staleness", None, "--skip-modcheck")
+    else:
+        thirdparty_gate()
+        rl.gate("GATE 6 third-party staleness", True)
+
+    # GATE 7 — instance<->bundle drift (hole #7): does the TEST instance test what actually ships?
+    if args.skip_drift:
+        print("\n=== GATE 7 (bundle drift): SKIPPED (--skip-drift)")
+        rl.gate("GATE 7 bundle-drift", None, "--skip-drift")
+    else:
+        drift_gate(args.strict_drift)
+        rl.gate("GATE 7 bundle-drift", True, "strict" if args.strict_drift else "report-only")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Gated modpack release pipeline.")
     ap.add_argument("--version", help="pack version to ship, e.g. 1.1.9 (no V prefix), or 'auto' "
@@ -533,6 +600,11 @@ def main():
     ap.add_argument("--smoke-timeout", type=int, default=600,
                     help="GATE 4c: server readiness timeout seconds (default 600)")
     ap.add_argument("--project-id", type=int, default=PACK_PROJECT_ID)
+    ap.add_argument("--verify", action="store_true",
+                    help="LOCAL AUDIT ONLY: run GATES 1–7 (opt-in --boot-verify/--smoke honored, so a "
+                         "bare --verify does NOT trigger the ~8-min pack boot or server smoke), log "
+                         "each gate to release-log.md (mode=VERIFY), then STOP before build/upload. "
+                         "NEVER builds zips / uploads / pushes. Wins over --execute if both are passed.")
     ap.add_argument("--execute", action="store_true", help="build zips + upload to CF + publish changelog")
     ap.add_argument("--force", action="store_true",
                     help="ship even if CF already has a file for V<version> (default: REFUSE to "
@@ -567,50 +639,30 @@ def main():
     if not re.fullmatch(r"[0-9]+(\.[0-9]+)*", args.version):
         sys.exit(f"--version must be a plain dotted number (got {args.version!r})")
 
-    # GATE 1 — clean tree (the zip build bumps version files; a dirty tree muddles the release commit)
-    dirty = subprocess.run(["git", "-C", str(PACK_REPO), "status", "--porcelain"],
-                           capture_output=True, text=True).stdout.strip()
-    if dirty:
-        sys.exit(f"⛔ GATE 1: pack repo working tree not clean:\n{dirty}\n— commit/stash first.")
-    print("=== GATE 1: pack repo tree clean ✓")
+    # release-log: open a run for this pipeline. VERIFY wins over --execute (local audit, no upload).
+    rl_mode = "VERIFY" if args.verify else ("UPLOAD" if args.execute else "DRY-RUN")
+    if args.verify and args.execute:
+        print("note: --verify wins over --execute — running the LOCAL AUDIT ONLY, no upload.\n")
+    rl = release_log.open_run("pack", f"V{args.version}", rl_mode, repo=str(PACK_REPO))
 
-    # GATE 2 — pack config consistency + Approved-only fileIDs. --check makes pack_sync exit non-zero
-    # on PENDING (would-change but unapplied) fileID edits, so a manifest fileID bumped-but-not-applied
-    # FAILS the gate instead of packaging zips with the stale OLD fileIDs.
-    run([sys.executable, HERE / "pack_sync.py", "--check"], "GATE 2 (pack_sync consistency)")
+    # GATES 1–7 (the local audit). A hard-fail gate still sys.exit()s (behavior unchanged); the
+    # wrapper logs a FAIL entry first, then re-raises. Opt-in gates (4b boot-verify / 4c smoke /
+    # 3 audit / 6 modcheck / 7 drift) honor their EXISTING flags for --verify too — a --verify does
+    # NOT silently trigger the ~8-min pack boot or the server smoke; pass --boot-verify/--smoke to
+    # include them. Each gate is logged (SKIPPED when its opt-in flag is off).
+    try:
+        _run_gates(args, rl)
+    except SystemExit:
+        rl.finish("FAIL", "a gate failed (see console) — aborted before build/upload")
+        raise
 
-    # GATE 3 — personal fork bundles not stale vs their GitHub releases
-    if args.skip_audit:
-        print("\n=== GATE 3: SKIPPED (--skip-audit)")
-    else:
-        run([sys.executable, HERE / "pack_sync.py", "--audit"], "GATE 3 (fork staleness audit)")
-
-    # GATE 4 — every shipped mod fetchable + manifest files[] Approved
-    run([sys.executable, HERE / "bundle_check.py"], "GATE 4 (bundle fetchability + manifest Approved)")
-
-    # GATE 4b — OPT-IN boot-verify: the pack must actually BOOT (mixins applied, no crash)
-    if args.boot_verify:
-        pack_boot_verify()
-    else:
-        print("\n=== GATE 4b (boot-verify): SKIPPED (pass --boot-verify to boot the pack + scan)")
-
-    # GATE 4c — OPT-IN smoke: the SHIPPED binaries must boot a server (+client) clean (hole #3)
-    smoke_gate(args)
-
-    # GATE 5 — config drift (CONCERN C): canonical config is what ships; report/enforce drift
-    config_gate(args.strict_config)
-
-    # GATE 6 — third-party staleness (CONCERN C): Approved updates for bundled third-party mods
-    if args.skip_modcheck:
-        print("\n=== GATE 6 (third-party staleness): SKIPPED (--skip-modcheck)")
-    else:
-        thirdparty_gate()
-
-    # GATE 7 — instance<->bundle drift (hole #7): does the TEST instance test what actually ships?
-    if args.skip_drift:
-        print("\n=== GATE 7 (bundle drift): SKIPPED (--skip-drift)")
-    else:
-        drift_gate(args.strict_drift)
+    # --verify STOPS here — gates ran + logged, NOTHING built or uploaded. Returning before the
+    # changelog/build/upload steps makes it impossible for --verify to reach a publish (by construction).
+    if args.verify:
+        rl.finish("VERIFY PASS", "gates 1-7 ran (boot/smoke honored their opt-in flags); no build/upload")
+        print("\n=== VERIFY COMPLETE — gates 1–7 ran; NOTHING built or uploaded (--verify). "
+              "release-log.md updated. ===")
+        return
 
     # step 5 — changelog
     if args.changelog_file:
@@ -643,6 +695,7 @@ def main():
         print("  3. cf_upload serverpack  -> same project, --parent-file-id <client id>")
         print(f"  4. changelog_publish.py --from-derive - --version V{args.version} --prepend")
         print("  5. YOU: review + commit the bump/changelog, push, watch CF review.")
+        rl.finish("DRY-RUN", "all gates pass; plan printed (no build/upload)")
         return
 
     # step 6 — build zips
@@ -701,6 +754,7 @@ cut commit: {cut_ref} ({push_note}) — use it as --baseline for the next releas
 Remaining (manual):
   - watch CF review (modpack = manual review)
   - housekeeping skill (archive bugs), update pipeline-mods.md""")
+    rl.finish("UPLOADED", f"CF client file {client_fid} + serverpack V{args.version}; cut {cut_ref}")
 
 
 if __name__ == "__main__":
