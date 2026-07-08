@@ -59,8 +59,10 @@ RELAUNCHER = "lwjgl3ify-relauncher.json"
 RELAUNCHER_MACHINE_KEYS = ("javaInstallationsCache", "javaInstallation")
 # exact config-relative paths (posix) that are machine-specific but NOT merge-able:
 DENY_FILES = set()
-# config-relative dir prefixes (posix) holding generated state, not authored config:
-DENY_DIRS = ()
+# config-relative dir prefixes (posix) NOT owned by config_sync — reverse-sync must NEVER touch them.
+# `mod-director/` = pack DELIVERY config (curse.bundle/url.bundle fileIDs) managed by pack_sync.py;
+# a reverse-sync would regress fileIDs to the instance's (possibly stale) versions + flip CRLF.
+DENY_DIRS = ("mod-director/",)
 
 
 def load_env():
@@ -199,6 +201,8 @@ def forward(canonical, instances, only, apply, one_instance):
             continue
         n_diff = n_apply = 0
         for rel in rels:
+            if deny_kind(rel) == "deny":  # mod-director/ etc. = pack_sync's domain, not config_sync
+                continue
             csrc = os.path.join(canonical, rel)
             idst = os.path.join(idir, rel)
             if not os.path.exists(idst):
