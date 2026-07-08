@@ -1,0 +1,16 @@
+# Normalize line endings: store LF in the repo, so a CRLF<->LF flip never shows up
+# in diffs / the GitHub "line endings changed" warning again. text=auto lets git
+# detect text vs binary; eol=lf pins the stored form.
+* text=auto eol=lf
+
+# Windows scripts must stay CRLF.
+*.bat  text eol=crlf
+*.ps1  text eol=crlf
+*.cmd  text eol=crlf
+
+# Binaries: never touch.
+*.png binary
+*.jar binary
+*.zip binary
+*.jfr binary
+*.ico binary
