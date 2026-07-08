@@ -137,6 +137,34 @@ def url_ok(url):
         return False, f"{url} ({e})"
 
 
+def resolve_gh_asset_url(old_url, new_ver):
+    """Resolve the REAL download URL of a GitHub release's primary jar so a version bump survives an
+    artifact RENAME. Naive substitution (old_url.replace(old_ver, new_ver)) 404s when the build's jar
+    name drifts across versions — e.g. IE fork4 dropped the '-mc1.7.10-' infix
+    (ImmersiveEngineering-mc1.7.10-0.7.11-fork3.jar -> ImmersiveEngineering-0.7.11-fork4.jar). Query
+    the release by tag=new_ver (public GitHub API), pick the .jar asset that is NOT
+    -sources/-dev/-javadoc, preferring one whose name carries the version. Returns None on any failure
+    so the caller falls back to pattern substitution."""
+    m = re.search(r"github\.com/([^/]+)/([^/]+)/releases/download/", old_url)
+    if not m:
+        return None
+    owner, repo = m.group(1), m.group(2)
+    api = f"https://api.github.com/repos/{owner}/{repo}/releases/tags/{urllib.parse.quote(new_ver)}"
+    try:
+        req = urllib.request.Request(
+            api, headers={"User-Agent": "pack_sync", "Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(req, timeout=25) as r:
+            assets = json.load(r).get("assets", [])
+    except Exception:
+        return None
+    jars = [a for a in assets if a.get("name", "").endswith(".jar")
+            and not re.search(r"-(sources|dev|javadoc)\.jar$", a["name"])]
+    if not jars:
+        return None
+    jars.sort(key=lambda a: (new_ver not in a["name"], len(a["name"])))  # prefer version-carrying, shortest
+    return jars[0].get("browser_download_url")
+
+
 def _iter_dicts(x):
     if isinstance(x, dict):
         yield x
@@ -251,7 +279,9 @@ def main():
                 elif old_ver == new_ver:
                     log(f"    = {m['name']} url.bundle already {new_ver}")
                 else:
-                    new_url = old_url.replace(old_ver, new_ver)
+                    # Resolve the real release asset (survives artifact renames, cf. IE fork4);
+                    # fall back to naive version substitution if the GitHub API is unreachable.
+                    new_url = resolve_gh_asset_url(old_url, new_ver) or old_url.replace(old_ver, new_ver)
                     replace_value(URL_BUNDLE, f'"url": "{old_url}"', f'"url": "{new_url}"',
                                   f"{m['name']} url.bundle {old_ver}->{new_ver}")
                     ok, u = url_ok(new_url)
