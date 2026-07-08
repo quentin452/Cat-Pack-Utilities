@@ -242,6 +242,65 @@ def pack_boot_verify():
     print("  GATE 4b: pack booted to a world, no fatal ✓")
 
 
+def config_gate(strict):
+    """GATE 5 (CONCERN C): run config_sync.py in PREVIEW (no --apply) and REPORT if the TEST
+    instance's game config differs from canonical in real content (EOL-agnostic; mod-director is
+    already excluded by config_sync). The canonical is what ships, so a diff means the instance was
+    tuned but not synced back (or vice-versa) — a visible gate. Not a hard fail by default (config
+    drift is often benign game-repopulation); --strict-config turns it into a hard fail."""
+    print("\n=== GATE 5 (config drift): config_sync.py --instance TEST (preview)")
+    proc = subprocess.run([sys.executable, str(HERE / "config_sync.py"), "--instance", "TEST"],
+                          capture_output=True, text=True)
+    out = (proc.stdout or "") + (proc.stderr or "")
+    total = sum(int(n) for n in re.findall(r"-> (\d+) differing", out))
+    drift = [ln for ln in out.splitlines() if re.search(r"^\s*(DIFFERS|NEW)\b", ln)]
+    if proc.returncode != 0 and total == 0:      # config_sync itself errored (e.g. canonical missing)
+        print(out[-1500:])
+        sys.exit("⛔ GATE 5: config_sync failed to run — cannot verify config drift.")
+    if total == 0:
+        print("  config in sync: TEST instance matches canonical (EOL-agnostic) ✓")
+        return
+    print(f"  ⚠️ {total} config file(s) DIFFER between the TEST instance and canonical "
+          f"(canonical is what ships):")
+    for ln in drift[:20]:
+        print("   " + ln.strip())
+    if len(drift) > 20:
+        print(f"   … +{len(drift) - 20} more")
+    if strict:
+        sys.exit("⛔ GATE 5 (--strict-config): config drift — reconcile canonical<->instance "
+                 "(config_sync.py [--from-instance TEST] --apply) then re-run.")
+    print("  (WARNING only — drift is often benign game-repopulation; confirm the canonical is what "
+          "you intend to ship. Pass --strict-config to hard-fail here.)")
+
+
+def thirdparty_gate():
+    """GATE 6 (CONCERN C): run mod_update_checker.py in PREVIEW (no --apply) against the CANONICAL
+    bundles (what ships) and REPORT third-party mods with an Approved update available — closes the
+    hole where the pipeline shipped stale third-party mods silently. Report-only (the human bumps
+    via mod_update_checker.py --apply then re-runs); --skip-modcheck bypasses it."""
+    inst = PACK_DIR / "src/common"     # canonical config/mod-director + no mods/ -> skip zip dates
+    print("\n=== GATE 6 (third-party staleness): mod_update_checker.py (preview, canonical bundles)")
+    # curse.bundle only: url.bundle (GitHub) staleness is GATE 3's domain (fork audit) and floods with
+    # the pack's INTENTIONAL GTNH version pins — the actionable third-party signal is the Approved-only
+    # curse.bundle bump (the checker's --apply enforces fileStatus==4).
+    proc = subprocess.run([sys.executable, str(HERE / "mod_update_checker.py"),
+                           "--instance", str(inst), "--skip-zipdates", "--skip-github"],
+                          capture_output=True, text=True)
+    out = (proc.stdout or "") + (proc.stderr or "")
+    approved = re.findall(r"addonId \d+: \d+ -> \d+.*", out)   # Approved-only curse.bundle bumps
+    if not approved:
+        if "CF_API_KEY absent" in out:
+            print("  CF_API_KEY absent — curse.bundle staleness UNVERIFIED (add a read key to enforce).")
+        else:
+            print("  no Approved third-party curse.bundle updates pending ✓")
+        return
+    print(f"  ⚠️ {len(approved)} third-party curse.bundle mod(s) have an Approved update available:")
+    for ln in approved:
+        print("   " + ln.strip())
+    print("  (REPORT only — bump third-party mods via mod_update_checker.py --apply "
+          "(Approved-only), re-run. Pass --skip-modcheck to bypass this gate.)")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Gated modpack release pipeline.")
     ap.add_argument("--version", help="pack version to ship, e.g. 1.1.9 (no V prefix). Default: AUTO "
@@ -251,6 +310,10 @@ def main():
     ap.add_argument("--changelog-file", type=Path,
                     help="hand-curated derive-markdown; default = raw derive output")
     ap.add_argument("--skip-audit", action="store_true", help="skip the fork-staleness audit gate")
+    ap.add_argument("--strict-config", action="store_true",
+                    help="GATE 5: hard-fail on config drift (default: report as a warning gate)")
+    ap.add_argument("--skip-modcheck", action="store_true",
+                    help="GATE 6: skip the third-party mod staleness gate (mod_update_checker)")
     ap.add_argument("--boot-verify", action="store_true",
                     help="GATE 4b: boot the pack TEST instance + scan the boot log before shipping "
                          "(refuse on fatal). OFF by default — full pack boots ~8 min; boots the "
@@ -306,6 +369,15 @@ def main():
         pack_boot_verify()
     else:
         print("\n=== GATE 4b (boot-verify): SKIPPED (pass --boot-verify to boot the pack + scan)")
+
+    # GATE 5 — config drift (CONCERN C): canonical config is what ships; report/enforce drift
+    config_gate(args.strict_config)
+
+    # GATE 6 — third-party staleness (CONCERN C): Approved updates for bundled third-party mods
+    if args.skip_modcheck:
+        print("\n=== GATE 6 (third-party staleness): SKIPPED (--skip-modcheck)")
+    else:
+        thirdparty_gate()
 
     # step 5 — changelog
     if args.changelog_file:
