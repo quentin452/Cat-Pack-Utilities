@@ -127,7 +127,10 @@ def sidetag(side):
 
 
 def _git(repo, *args):
-    r = subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True)
+    # errors="replace": Minecraft configs are often latin-1 (e.g. § color codes = 0xa7), which is
+    # invalid UTF-8 — a strict decode of the diff output would crash the whole changelog derivation.
+    r = subprocess.run(["git", "-C", repo, *args], capture_output=True, encoding="utf-8",
+                       errors="replace")
     return r.stdout if r.returncode == 0 else ""
 
 
@@ -146,7 +149,7 @@ def _diff_is_noise(repo, old_ref, new_ref, rel):
     """True if every changed line of this file is blank or a comment (# // ;). Cheap heuristic: it
     catches header/timestamp/comment churn but NOT reordering, JSON key shuffles, or value-equivalent
     reformatting — those still surface as real changes (favoring false-negative over hiding a change)."""
-    out = _git(repo, "diff", "-U0", old_ref, new_ref, "--", CONFIG_PREFIX + rel)
+    out = _git(repo, "diff", "--ignore-cr-at-eol", "-U0", old_ref, new_ref, "--", CONFIG_PREFIX + rel)
     saw = False
     for line in out.splitlines():
         if line.startswith(("+++", "---")):
@@ -164,7 +167,7 @@ def config_changes(repo, old_ref, new_ref):
     {rel, status(A/M/D), add, dele, binary}; skipped = count of comment/blank-only files filtered out.
     Renames are reported as delete+add (no -M) to keep parsing robust against spaces in the pack path."""
     status = {}
-    for line in _git(repo, "diff", "--name-status", old_ref, new_ref, "--", CONFIG_SUB).splitlines():
+    for line in _git(repo, "diff", "--ignore-cr-at-eol", "--name-status", old_ref, new_ref, "--", CONFIG_SUB).splitlines():
         parts = line.split("\t")      # tab-separated: paths may contain spaces but never tabs
         if len(parts) < 2:
             continue
@@ -172,7 +175,7 @@ def config_changes(repo, old_ref, new_ref):
         if rel is not None:
             status[rel] = parts[0][:1]
     counts = {}
-    for line in _git(repo, "diff", "--numstat", old_ref, new_ref, "--", CONFIG_SUB).splitlines():
+    for line in _git(repo, "diff", "--ignore-cr-at-eol", "--numstat", old_ref, new_ref, "--", CONFIG_SUB).splitlines():
         parts = line.split("\t")      # '<added>\t<deleted>\t<path>'; '-' counts for binary files
         if len(parts) < 3:
             continue
