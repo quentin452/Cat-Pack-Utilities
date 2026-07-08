@@ -21,9 +21,22 @@
       "type": "promptString",
       "description": "Profiling window (seconds)",
       "default": "60"
+    },
+    {
+      "id": "deriskMod",
+      "type": "promptString",
+      "description": "Target mod name substring (from the pack) to de-risk on a fast minimal instance",
+      "default": "manametalmod"
     }
   ],
   "tasks": [
+    {
+      "label": "Devtools: build minimal de-risk instance (+boot/heal)",
+      "type": "shell",
+      "command": "python3 make_minimal_instance.py --mod ${input:deriskMod} --extra archaicfix --extra endlessids --autoworld default --boot",
+      "detail": "Assemble a ~90s-boot minimal instance (coremod baseline + OaT + target mod + extras) to de-risk ONE mixin before the ~8min full pack. Auto-heals missing FML deps (boot-and-heal: detect 'requires mods [X]' -> resolve modid->jar -> reboot). RPC on 127.0.0.1:25580.",
+      "problemMatcher": []
+    },
     {
       "label": "Pack: generate client+server zips",
       "type": "shell",
