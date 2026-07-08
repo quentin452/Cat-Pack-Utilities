@@ -270,7 +270,8 @@ def main():
                 if APPLY:
                     for f in old:
                         os.remove(os.path.join(SERVER_MODS, f))
-                    shutil.copy2(src, dst)
+                    if not (os.path.exists(dst) and os.path.samefile(src, dst)):
+                        shutil.copy2(src, dst)
                 # FileDirector consistency: client fileID's fork must match the server jar fork
                 fork = pk.get("fork")
                 cf_fork = re.search(r"fork\d+", new_disp or new_fn or "")
