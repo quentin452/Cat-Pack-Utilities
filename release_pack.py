@@ -15,6 +15,13 @@ references is actually deliverable:
   GATE 4b boot-verify [--boot-verify] — OPT-IN (OFF by default, full pack boots ~8 min): boot the
                                         pack TEST instance + boot_crash_scan the fresh log; refuse
                                         to zip/upload on a fatal (compile-green != apply-green).
+  GATE 4c smoke       [--smoke]       — OPT-IN (OFF, boots a server ~minutes): build/verify the FRESH
+                                        shipped local-build mods, sync them in (update_local), then
+                                        release.py smoke (throwaway server clone + optional client
+                                        auto-join); refuse to ship unless it reports PASS.
+  GATE 7  bundle drift                — bundle_drift.py: does the TEST instance's mods/ match what the
+                                        bundles DECLARE, both ways (undeclared additions + removals)?
+                                        Report-only (--strict-drift to hard-fail, --skip-drift to skip).
   step 5  changelog derive            — changelog_from_bundles.py <baseline>..HEAD --markdown
                                         (or --changelog-file for hand-curated wording)
   step 6  build zips [--execute]      — generate_modpack_zips.py <version> (bumps manifest+modpack.json)
@@ -35,6 +42,7 @@ Baseline = the commit of the LAST PUBLISHED pack version (what players have), no
 """
 
 import argparse
+import glob
 import json
 import os
 import re
@@ -58,6 +66,13 @@ PACK_BOOT_LOG = "boot-relverify.log"      # dedicated fresh log (the instance ke
 JAVA = "/usr/lib/jvm/default-runtime/bin/java"
 CRASH_SCAN = HERE / "boot_crash_scan.py"
 PACK_BOOT_TIMEOUT = 660                    # the full pack boots in ~8 min
+# --smoke gate (GATE 4c): boot a throwaway server clone with the FRESH shipped binaries.
+RELEASE_MANIFEST = Path.home() / "Documents/GitHub/Mod-Sandbox/memory/release-manifest.json"
+RELEASE_PY = HERE / "release.py"
+UPDATE_LOCAL = HERE / "update_local.py"
+# dirs never scanned for a mod's "newest source" mtime (build outputs / VCS / IDE / caches).
+_SRC_SKIP_DIRS = {"build", ".git", ".gradle", ".idea", "run", "out", "bin", ".settings", "libs"}
+_SRC_SKIP_EXT = (".jar", ".zip", ".class", ".log")
 
 
 def run(cmd, gate, cwd=None, capture=False):
@@ -301,6 +316,117 @@ def thirdparty_gate():
           "(Approved-only), re-run. Pass --skip-modcheck to bypass this gate.)")
 
 
+def _shipped_local_build_mods():
+    """Manifest mods that ship in the pack AND build from HEAD locally (jar_glob) — the binaries the
+    smoke test must boot FRESH. Skips pack-delivery-only entries (no jar_glob), mods not in the pack
+    (pack falsy), and PINNED deliveries (FileDirector: a fixed CF-Approved file, NOT a HEAD build —
+    rebuilding/swapping it would smoke-test something that never ships)."""
+    mods = json.load(open(RELEASE_MANIFEST))["mods"]
+    out = []
+    for m in mods:
+        if not m.get("jar_glob") or not m.get("pack"):
+            continue
+        pk = m["pack"]
+        if isinstance(pk, dict) and ("_pin" in pk or str(pk.get("delivery", "")).startswith("client_manifest")):
+            continue
+        out.append(m)
+    return out
+
+
+def _newest_built_jar(m):
+    repo = os.path.expanduser(m["repo"])
+    cands = [p for p in glob.glob(os.path.join(repo, m["jar_glob"]))
+             if not any(x in os.path.basename(p) for x in m.get("jar_exclude", []))]
+    return max(cands, key=os.path.getmtime) if cands else None
+
+
+def _newest_source_mtime(repo):
+    """(mtime, path) of the newest SOURCE file in the repo (build outputs / VCS / caches excluded).
+    Heuristic freshness signal: if the built jar predates this, the jar is a stale build."""
+    repo = os.path.expanduser(repo)
+    newest, newest_f = 0.0, None
+    for dp, dns, fns in os.walk(repo):
+        dns[:] = [d for d in dns if d not in _SRC_SKIP_DIRS and not d.startswith(".")]
+        for fn in fns:
+            if fn.endswith(_SRC_SKIP_EXT):
+                continue
+            p = os.path.join(dp, fn)
+            try:
+                mt = os.path.getmtime(p)
+            except OSError:
+                continue
+            if mt > newest:
+                newest, newest_f = mt, p
+    return newest, newest_f
+
+
+def _smoke_freshness_guard(mods, build):
+    """Guarantee the smoke test boots FRESH binaries: for each shipped local-build mod, either
+    ./gradlew build it (--smoke-build), or FAIL loudly if its newest built jar is older than its
+    newest source file (a stale build) or missing. Never silently smoke-test a stale jar."""
+    for m in mods:
+        repo = os.path.expanduser(m["repo"])
+        if build:
+            print(f"  building {m['name']} (./gradlew build in {repo})...")
+            r = subprocess.run(["./gradlew", "build"], cwd=repo)
+            if r.returncode != 0:
+                sys.exit(f"⛔ GATE 4c (smoke): {m['name']} ./gradlew build FAILED — fix + re-run.")
+        jar = _newest_built_jar(m)
+        if not jar:
+            sys.exit(f"⛔ GATE 4c (smoke): no built jar for {m['name']} ({m['jar_glob']}) — build it "
+                     f"first (./gradlew build in {repo}) or pass --smoke-build. Refusing to smoke-test "
+                     f"a missing binary.")
+        src_mt, src_f = _newest_source_mtime(repo)
+        if src_mt and os.path.getmtime(jar) < src_mt:
+            sys.exit(f"⛔ GATE 4c (smoke): {m['name']} built jar is STALE — {os.path.basename(jar)} is "
+                     f"OLDER than source {os.path.relpath(src_f, repo)}. Rebuild it (./gradlew build) "
+                     f"or pass --smoke-build; refusing to smoke-test a stale binary.")
+        print(f"  fresh ✓ {m['name']}: {os.path.basename(jar)} (newer than newest source)")
+
+
+def smoke_gate(args):
+    """GATE 4c (opt-in --smoke, hole #3): boot a throwaway SERVER clone (release.py smoke) with the
+    FRESH shipped binaries and refuse the release unless it reports PASS. release.py smoke already
+    clones the real server (never mutating it) + optionally auto-joins a GUI client; the gated pipeline
+    never called it, so a server-crashing pack could ship. OFF by default (boots ~minutes; --smoke-client
+    needs a DISPLAY). Freshness sub-step first: build/verify each shipped local-build mod then sync the
+    SAME jars into the instances via update_local, so smoke boots exactly what will ship (not a stale jar)."""
+    print("\n=== GATE 4c (--smoke): server smoke-test (release.py smoke) before ship")
+    if not args.smoke:
+        print("  SKIPPED (--smoke to enable — boots a throwaway server ~minutes; --smoke-client also "
+              "boots a GUI client and needs a DISPLAY)")
+        return
+    if not RELEASE_MANIFEST.is_file():
+        sys.exit(f"⛔ GATE 4c: release manifest not found: {RELEASE_MANIFEST}")
+    mods = _shipped_local_build_mods()
+    print(f"  freshness guard — {len(mods)} shipped local-build mod(s): "
+          f"{', '.join(m['name'] for m in mods) or '(none)'}")
+    print("  (pinned/pack-delivery-only mods e.g. FileDirector are excluded — they don't build from HEAD)")
+    _smoke_freshness_guard(mods, args.smoke_build)
+    # Sync those fresh jars into the instances the smoke test boots: update_local copies into the REAL
+    # server mods/ (release.py smoke then cp -a clones it) AND the TEST client (used by --smoke-client).
+    for m in mods:
+        print(f"  sync fresh {m['name']} -> instances (update_local.py --only {m['name']} --apply)")
+        r = subprocess.run([sys.executable, str(UPDATE_LOCAL), "--only", m["name"], "--apply"],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            sys.exit(f"⛔ GATE 4c (smoke): update_local failed to sync {m['name']} — {r.stderr.strip()}")
+    # Boot the throwaway clone (+ optional client) with the same interpreter; require exit 0 = PASS.
+    cmd = [sys.executable, str(RELEASE_PY), "smoke",
+           "--soak", str(args.smoke_soak), "--timeout", str(args.smoke_timeout)]
+    if args.smoke_client:
+        cmd.append("--client")
+    print(f"  booting smoke: {' '.join(cmd)}")
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    tail = "\n".join((proc.stdout or "").splitlines()[-25:])
+    print(tail)
+    if proc.returncode != 0:
+        sys.exit(f"⛔ GATE 4c (smoke): server smoke-test FAILED (release.py smoke exit {proc.returncode}) "
+                 f"— NOT releasing. Fix the crash + re-run. Tail above.")
+    print("  GATE 4c: smoke PASS — the fresh shipped binaries boot a server"
+          + (" + client join" if args.smoke_client else "") + " clean ✓")
+
+
 def drift_gate(strict):
     """GATE 7 (hole #7): run bundle_drift.py — does the TEST instance's mods/ match what the
     canonical bundles DECLARE, BOTH ways (undeclared additions + removals)? A stale/hand-edited test
@@ -352,6 +478,20 @@ def main():
                     help="GATE 4b: boot the pack TEST instance + scan the boot log before shipping "
                          "(refuse on fatal). OFF by default — full pack boots ~8 min; boots the "
                          "game so run single-instance on the main thread")
+    ap.add_argument("--smoke", action="store_true",
+                    help="GATE 4c: boot a throwaway SERVER clone (release.py smoke) with the FRESH "
+                         "shipped binaries and require PASS before ship. OFF by default (boots "
+                         "~minutes); boots the game so run single-instance on the main thread")
+    ap.add_argument("--smoke-build", action="store_true",
+                    help="GATE 4c: ./gradlew build each shipped local-build mod before smoke "
+                         "(default: FAIL if a built jar is older than its source = stale build)")
+    ap.add_argument("--smoke-client", action="store_true",
+                    help="GATE 4c: also boot the GUI client + auto-join (needs a DISPLAY); PASS then "
+                         "also requires the client to join")
+    ap.add_argument("--smoke-soak", type=int, default=120,
+                    help="GATE 4c: server soak seconds after ready (default 120)")
+    ap.add_argument("--smoke-timeout", type=int, default=600,
+                    help="GATE 4c: server readiness timeout seconds (default 600)")
     ap.add_argument("--project-id", type=int, default=PACK_PROJECT_ID)
     ap.add_argument("--execute", action="store_true", help="build zips + upload to CF + publish changelog")
     ap.add_argument("--force", action="store_true",
@@ -403,6 +543,9 @@ def main():
         pack_boot_verify()
     else:
         print("\n=== GATE 4b (boot-verify): SKIPPED (pass --boot-verify to boot the pack + scan)")
+
+    # GATE 4c — OPT-IN smoke: the SHIPPED binaries must boot a server (+client) clean (hole #3)
+    smoke_gate(args)
 
     # GATE 5 — config drift (CONCERN C): canonical config is what ships; report/enforce drift
     config_gate(args.strict_config)
