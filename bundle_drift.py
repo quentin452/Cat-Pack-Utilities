@@ -168,13 +168,15 @@ def collect_declared(canonical_config, cf_key):
 
 # --- instance scan -----------------------------------------------------------
 def scan_instance(mods_dir):
-    """(installed_lower_set, disabled_lower_set). Top-level *.jar/*.zip only (subdirs = mod configs)."""
+    """(installed_lower_set, disabled_lower_set). Scans mods/ RECURSIVELY — Forge 1.7.10 loads jars from
+    mods/ AND version subfolders (mods/1.7.10/, …); config subdirs hold no jars so recursion is safe.
+    (Top-level-only missed mods in mods/1.7.10/ → false 'removals'.)"""
     installed = set()
     for ext in ("*.jar", "*.zip"):
-        for p in glob.glob(os.path.join(mods_dir, ext)):
+        for p in glob.glob(os.path.join(mods_dir, "**", ext), recursive=True):
             installed.add(os.path.basename(p).lower())
     disabled = set()
-    for p in glob.glob(os.path.join(mods_dir, "*" + DISABLED_MARKER)):
+    for p in glob.glob(os.path.join(mods_dir, "**", "*" + DISABLED_MARKER), recursive=True):
         disabled.add(os.path.basename(p)[: -len(DISABLED_MARKER)].lower())
     return installed, disabled
 
