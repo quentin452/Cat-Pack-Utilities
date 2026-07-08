@@ -69,7 +69,10 @@ def scan(path):
 
 
 def report(r):
-    fatal_hit = bool(r['fatal'] or r['crashed'] or r['culprits'])
+    # r['mixins'] is included: the MIXIN regex only matches FAILURE lines (InvalidInjectionException /
+    # apply failed / was not applied / critical injection), so a mixin soft-fail that does NOT hard-crash
+    # (require=0) still flips the exit non-zero — otherwise boot-verify would PASS a broken mixin apply.
+    fatal_hit = bool(r['fatal'] or r['crashed'] or r['culprits'] or r['mixins'])
     tag = "FATAL" if fatal_hit else ("OK" if r['succeeded'] else "INCONCLUSIVE")
     print(f"\n=== {os.path.basename(r['path'])} :: {tag} ===")
     if r['fatal']:
