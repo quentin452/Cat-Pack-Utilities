@@ -32,12 +32,16 @@ Baseline = the commit of the LAST PUBLISHED pack version (what players have), no
 """
 
 import argparse
+import json
+import os
 import re
 import subprocess
 import sys
+import urllib.request
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+CF_READ_API = "https://api.curseforge.com"
 PACK_REPO = Path.home() / "Documents/GitHub/privates-minecraft-modpack"
 PACK_DIR = PACK_REPO / "MODPACKS/Biggess Pack Cat Edition"
 DIST = PACK_DIR / "dist"
@@ -56,6 +60,44 @@ def run(cmd, gate, cwd=None, capture=False):
     return proc
 
 
+def cf_read_key():
+    """CF_API_KEY read key from env or .env.local/.env (never printed)."""
+    if os.environ.get("CF_API_KEY"):
+        return os.environ["CF_API_KEY"]
+    for name in (".env.local", ".env"):
+        p = HERE / name
+        if p.is_file():
+            for line in p.read_text().splitlines():
+                line = line.strip()
+                if line.startswith("CF_API_KEY="):
+                    return line.split("=", 1)[1].strip().strip("'\"")
+    return None
+
+
+def pack_already_published(project_id, version):
+    """Return the CF file that already carries V<version> for this pack (dict), False if none, or
+    None if UNVERIFIABLE (no read key / API error). Guards against re-shipping a live pack version."""
+    key = cf_read_key()
+    if not key:
+        return None
+    url = f"{CF_READ_API}/v1/mods/{project_id}/files?pageSize=50"
+    req = urllib.request.Request(url, method="GET")
+    req.add_header("x-api-key", key)
+    req.add_header("Accept", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            files = json.load(r).get("data", [])
+    except Exception as e:
+        print(f"⚠️ could not query CF pack files (no dup check): {e}")
+        return None
+    # Boundary-aware so 'V1.1.1' does NOT match 'V1.1.10' (versions are sequential, this matters).
+    pat = re.compile(re.escape(f"V{version}") + r"(?![0-9.])")
+    for f in files:
+        if pat.search(str(f.get("displayName", ""))) or pat.search(str(f.get("fileName", ""))):
+            return f
+    return False
+
+
 def main():
     ap = argparse.ArgumentParser(description="Gated modpack release pipeline.")
     ap.add_argument("--version", required=True, help="pack version to ship, e.g. 1.1.9 (no V prefix)")
@@ -66,6 +108,9 @@ def main():
     ap.add_argument("--skip-audit", action="store_true", help="skip the fork-staleness audit gate")
     ap.add_argument("--project-id", type=int, default=PACK_PROJECT_ID)
     ap.add_argument("--execute", action="store_true", help="build zips + upload to CF + publish changelog")
+    ap.add_argument("--force", action="store_true",
+                    help="ship even if CF already has a file for V<version> (default: REFUSE to "
+                         "avoid re-shipping a live pack version)")
     args = ap.parse_args()
 
     if not re.fullmatch(r"[0-9]+(\.[0-9]+)*", args.version):
@@ -100,6 +145,19 @@ def main():
         changelog = proc.stdout
     if not changelog.strip():
         sys.exit("⛔ empty changelog — wrong baseline?")
+
+    # Anti-duplicate: is V<version> already published on CF? (read-only probe; report in dry-run,
+    # ENFORCE in execute unless --force). Prevents re-shipping a live pack version + a wasted build.
+    published = pack_already_published(args.project_id, args.version)
+    if published:
+        msg = (f"CF already has a file for V{args.version} "
+               f"(id {published.get('id')}, displayName {published.get('displayName')!r})")
+        if args.execute and not args.force:
+            sys.exit(f"⛔ {msg} — REFUSING to re-ship. Pass --force to override, or bump --version.")
+        print(f"\n⚠️ {msg}" + (" — --force set, will re-ship" if args.execute else
+                                " — would REFUSE to ship (pass --force to override)"))
+    elif published is None:
+        print("\n⚠️ could not verify whether V%s is already on CF (no read key) — not enforced." % args.version)
 
     if not args.execute:
         print("\n=== DRY-RUN COMPLETE — all gates PASS. Plan with --execute:")

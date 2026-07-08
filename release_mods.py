@@ -29,8 +29,12 @@ import re
 import subprocess
 import sys
 import tempfile
+import urllib.error
+import urllib.request
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+CF_READ_API = "https://api.curseforge.com"       # read API (CF_API_KEY) — existence checks only
+MODRINTH_API = "https://api.modrinth.com/v2"
 # The manifest (release plan) lives in the Mod-Sandbox hub (planning data, versioned +
 # auto-pushed, next to pipeline-mods.md). Override with --manifest.
 MANIFEST = os.path.expanduser("~/Documents/GitHub/Mod-Sandbox/memory/release-manifest.json")
@@ -65,6 +69,125 @@ def origin_slug(repo):
     url = git(repo, "remote", "get-url", "origin", check=False)
     m = re.search(r"github\.com[:/]([^/]+/[^/.]+?)(?:\.git)?$", url)
     return m.group(1) if m else None
+
+
+def read_env(key):
+    """Read KEY from .env / .env.local (real env wins) — used for the CF_API_KEY read key. Never
+    prints the value."""
+    if os.environ.get(key):
+        return os.environ[key]
+    for name in (".env", ".env.local"):
+        path = os.path.join(SCRIPT_DIR, name)
+        if not os.path.isfile(path):
+            continue
+        for line in open(path):
+            line = line.strip()
+            if line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            if k.strip() == key:
+                return v.strip().strip("'\"")
+    return None
+
+
+# --- idempotency: read-only "already published?" probes per target ---------------------------
+# These make a re-run of an already-released version a no-op instead of a duplicate upload
+# (gh release create would error; cf_upload would post a DUPLICATE file — there is no dedupe on CF).
+
+def gh_release_exists(slug, version):
+    """True if a GitHub release tagged <version> already exists on the fork (`gh release view`)."""
+    if not slug:
+        return False
+    _, code = run(["gh", "release", "view", version, "-R", slug], check=False)
+    return code == 0
+
+
+def _version_matches_file(version, f):
+    """A CF/Modrinth file 'carries' this version if the version string appears in its fileName or
+    displayName. CF author uploads set displayName = the version we pass (e.g. 'V1.17.5', '1.0.4',
+    '1.9.1-fork9'); the raw fileName may differ (build artifact name), so we check BOTH — robust to
+    either convention."""
+    v = str(version).lower()
+    return (v in str(f.get("fileName", "")).lower()
+            or v in str(f.get("displayName", "")).lower())
+
+
+def cf_file_exists(project_id, version, api_key):
+    """True if the CF project already has a file for <version>, False if not, None if UNVERIFIABLE
+    (no read key or API error — caller decides whether to skip-for-safety or force)."""
+    if not api_key:
+        return None
+    url = f"{CF_READ_API}/v1/mods/{project_id}/files?pageSize=50"
+    req = urllib.request.Request(url, method="GET")
+    req.add_header("x-api-key", api_key)
+    req.add_header("Accept", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            files = json.load(r).get("data", [])
+    except Exception as e:
+        print(f"  [cf-check] WARN: could not query CF files for project {project_id}: {e}")
+        return None
+    return any(_version_matches_file(version, f) for f in files)
+
+
+def modrinth_version_exists(project, version):
+    """True if the Modrinth project already has a version numbered <version>, False if not, None if
+    UNVERIFIABLE (public API, so None = transient error only)."""
+    url = f"{MODRINTH_API}/project/{project}/version"
+    req = urllib.request.Request(url, method="GET")
+    req.add_header("Accept", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            versions = json.load(r)
+    except Exception as e:
+        print(f"  [mr-check] WARN: could not query Modrinth for {project}: {e}")
+        return None
+    return any(str(v.get("version_number")) == str(version) for v in versions)
+
+
+def publish_plan(mod, slug, cf_api_key, force, force_cf):
+    """Read-only per-target plan so dry-run and execute agree and neither duplicates. Returns
+    {target: (action, note)} with action in {'publish','skip'}. Targets: 'GitHub' always; 'CF' and
+    'Modrinth' only if configured."""
+    version = mod["version"]
+    plan = {}
+
+    # GitHub — always a target. gh itself refuses a duplicate tag, so on exists we ALWAYS skip
+    # (even with --force; there is nothing safe to force here).
+    if gh_release_exists(slug, version):
+        plan["GitHub"] = ("skip", f"GitHub {version} already released")
+    else:
+        plan["GitHub"] = ("publish", None)
+
+    if mod.get("curseforge"):
+        pid = mod["curseforge"]["project_id"]
+        if force:
+            plan["CF"] = ("publish", "forced (--force)")
+        else:
+            exists = cf_file_exists(pid, version, cf_api_key)
+            if exists is True:
+                plan["CF"] = ("skip", f"CF file for {version} already exists")
+            elif exists is False:
+                plan["CF"] = ("publish", None)
+            elif force_cf:
+                plan["CF"] = ("publish", "unverifiable but --force-cf")
+            else:  # cannot verify (no CF_API_KEY / API error) -> skip to avoid a duplicate
+                plan["CF"] = ("skip", "cannot verify CF (no CF_API_KEY) — skipping to avoid a "
+                                      "duplicate; pass --force-cf to upload anyway")
+
+    if mod.get("modrinth"):
+        proj = mod["modrinth"]["project"]
+        if force:
+            plan["Modrinth"] = ("publish", "forced (--force)")
+        else:
+            exists = modrinth_version_exists(proj, version)
+            if exists is True:
+                plan["Modrinth"] = ("skip", f"Modrinth {version} already exists")
+            elif exists is False:
+                plan["Modrinth"] = ("publish", None)
+            else:  # public API; None = transient error -> attempt (Modrinth rejects true dupes itself)
+                plan["Modrinth"] = ("publish", "could not verify Modrinth — will attempt")
+    return plan
 
 
 def dirty_paths(repo, ignore=()):
@@ -136,7 +259,8 @@ def find_jar(repo, mod):
     return max(cands, key=os.path.getmtime)
 
 
-def release_one(mod, execute, skip_build, changelog_override=None):
+def release_one(mod, execute, skip_build, changelog_override=None, force=False, force_cf=False,
+                cf_api_key=None):
     name = mod["name"]
     repo = os.path.expanduser(mod["repo"])
     version = mod["version"]
@@ -233,44 +357,67 @@ def release_one(mod, execute, skip_build, changelog_override=None):
         changelog = changelog_override
         log(f"changelog OVERRIDDEN (--changelog-file): {len(changelog.splitlines())} line(s) — curated wording replaces the raw commit subjects")
 
+    # Idempotency: probe every target read-only so a re-run skips what is already published
+    # (no duplicate GitHub release / CF file / Modrinth version) instead of erroring or duplicating.
+    slug = origin_slug(repo)
+    plan = publish_plan(mod, slug, cf_api_key, force, force_cf)
+
     if not execute:
-        tgt = ["GitHub"]
-        if mod.get("curseforge"):
-            tgt.append(f"CF:{mod['curseforge']['project_id']}")
-        if mod.get("modrinth"):
-            tgt.append(f"Modrinth:{mod['modrinth']['project']}")
-        log(f"[dry-run] would publish to: {', '.join(tgt)}")
+        for tgt, (action, note) in plan.items():
+            if action == "publish":
+                log(f"[dry-run] would publish {tgt}" + (f" ({note})" if note else ""))
+            else:
+                log(f"[dry-run] {tgt}: already released — would skip" + (f" ({note})" if note else ""))
         return True
 
-    # --- real publish ---
-    git(repo, "push", "origin", version)  # push the tag
+    if all(action == "skip" for action, _ in plan.values()):
+        log(f"already fully released — nothing to publish ({version})")
+        return True
+
+    # --- real publish (only the targets that are actually missing) ---
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
         f.write(changelog + "\n")
         notes = f.name
-    gh_cmd = ["gh", "release", "create", version, "-t", mod["gh_title"], "-F", notes, jar]
-    slug = origin_slug(repo)
-    if slug:
-        gh_cmd += ["-R", slug]  # target the fork, not gh's default (the upstream parent)
-    run(gh_cmd, cwd=repo)
-    log(f"GitHub release {version} created ({slug or 'default repo'})")
+    try:
+        gh_action, gh_note = plan["GitHub"]
+        if gh_action == "publish":
+            git(repo, "push", "origin", version)  # push the tag
+            gh_cmd = ["gh", "release", "create", version, "-t", mod["gh_title"], "-F", notes, jar]
+            if slug:
+                gh_cmd += ["-R", slug]  # target the fork, not gh's default (the upstream parent)
+            run(gh_cmd, cwd=repo)
+            log(f"GitHub release {version} created ({slug or 'default repo'})")
+        else:
+            log(f"GitHub: {gh_note} — skip")
 
-    if mod.get("curseforge"):
-        cf = mod["curseforge"]
-        run(["python3", os.path.join(SCRIPT_DIR, "cf_upload.py"),
-             "--project-id", str(cf["project_id"]), "--file", jar,
-             "--display-name", version, "--game-version", cf.get("game_version", "1.7.10"),
-             "--release-type", "release", "--changelog-file", notes], capture=False)
-        log("CurseForge upload done")
+        if mod.get("curseforge"):
+            cf = mod["curseforge"]
+            cf_action, cf_note = plan["CF"]
+            if cf_action == "publish":
+                cf_cmd = ["python3", os.path.join(SCRIPT_DIR, "cf_upload.py"),
+                          "--project-id", str(cf["project_id"]), "--file", jar,
+                          "--display-name", version, "--game-version", cf.get("game_version", "1.7.10"),
+                          "--release-type", "release", "--changelog-file", notes]
+                if force:
+                    cf_cmd.append("--force")  # let cf_upload's own duplicate guard through too
+                run(cf_cmd, capture=False)
+                log("CurseForge upload done")
+            else:
+                log(f"CurseForge: {cf_note} — skip")
 
-    if mod.get("modrinth"):
-        mr = mod["modrinth"]
-        run(["python3", os.path.join(SCRIPT_DIR, "modrinth_upload.py"),
-             "--project", mr["project"], "--file", jar, "--version", version,
-             "--game-version", mr.get("game_version", "1.7.10"),
-             "--release-type", "release", "--changelog-file", notes], capture=False)
-        log("Modrinth upload done")
-
-    os.unlink(notes)
+        if mod.get("modrinth"):
+            mr = mod["modrinth"]
+            mr_action, mr_note = plan["Modrinth"]
+            if mr_action == "publish":
+                run(["python3", os.path.join(SCRIPT_DIR, "modrinth_upload.py"),
+                     "--project", mr["project"], "--file", jar, "--version", version,
+                     "--game-version", mr.get("game_version", "1.7.10"),
+                     "--release-type", "release", "--changelog-file", notes], capture=False)
+                log("Modrinth upload done")
+            else:
+                log(f"Modrinth: {mr_note} — skip")
+    finally:
+        os.unlink(notes)
     return True
 
 
@@ -281,6 +428,12 @@ def main():
     ap.add_argument("--execute", action="store_true", help="actually tag/push/publish (default: dry-run)")
     ap.add_argument("--skip-build", action="store_true", help="trust an existing build")
     ap.add_argument("--changelog-file", help="curated release notes (markdown); only with --only")
+    ap.add_argument("--force", action="store_true",
+                    help="publish to EVERY configured target even if it already has this version "
+                         "(danger: re-uploads a duplicate CF/Modrinth file). GitHub is never forced.")
+    ap.add_argument("--force-cf", action="store_true",
+                    help="upload to CurseForge even when it can't be verified (no CF_API_KEY read "
+                         "key); default without a key is to SKIP the CF upload for safety")
     args = ap.parse_args()
 
     mods = json.load(open(args.manifest))["mods"]
@@ -299,6 +452,8 @@ def main():
             override = f.read().strip()
         if not override:
             sys.exit(f"--changelog-file {args.changelog_file} is empty")
+
+    cf_api_key = read_env("CF_API_KEY")  # read key (never printed) — for the CF existence probe
 
     mode = "EXECUTE" if args.execute else "DRY-RUN"
     print(f"===== release_mods [{mode}] — {len(mods)} mod(s) =====\n")
@@ -324,7 +479,8 @@ def main():
     done = 0
     for m in ready:
         try:
-            if release_one(m, args.execute, args.skip_build, changelog_override=override):
+            if release_one(m, args.execute, args.skip_build, changelog_override=override,
+                           force=args.force, force_cf=args.force_cf, cf_api_key=cf_api_key):
                 done += 1
         except Exception as e:
             print(f"  [{m['name']}] ERROR: {e}")

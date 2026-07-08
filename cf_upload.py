@@ -70,6 +70,31 @@ def read_api_key():
     return os.environ.get("CF_API_KEY")
 
 
+def find_existing_file(project_id, display_name, file_basename, key):
+    """Last-line anti-duplicate: return an already-uploaded file that matches THIS upload, or None.
+    Uses the read API (CF_API_KEY). A match = same displayName (exact) or same fileName (exact jar
+    basename) — exact so a client 'V1.1.9' upload is NOT confused with its 'V1.1.9 Server Pack'
+    additional file. Returns None (can't check) if no read key or the API errors."""
+    if not key:
+        return None
+    url = f"https://api.curseforge.com/v1/mods/{project_id}/files?pageSize=50"
+    req = urllib.request.Request(url, method="GET")
+    req.add_header("x-api-key", key)
+    req.add_header("Accept", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            files = json.load(r).get("data", [])
+    except Exception as e:
+        print(f"[cf-upload] WARN: could not query existing files (no dup check): {e}")
+        return None
+    for f in files:
+        if display_name and str(f.get("displayName", "")) == display_name:
+            return f
+        if str(f.get("fileName", "")) == file_basename:
+            return f
+    return None
+
+
 def verify(token, project_id, game_version):
     """Pre-flight: upload token valid + game version resolvable + (if possible) project exists.
     game_version may be a comma-separated list (bootstrapper mods span many MC versions);
@@ -199,6 +224,9 @@ def main():
                     help="attach as an additional file (e.g. a server pack) of this main file id; "
                          "game versions are inherited from the parent and must NOT be sent")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--force", action="store_true",
+                    help="upload even if a file with the same displayName/fileName already exists "
+                         "(default: REFUSE to avoid a duplicate)")
     ap.add_argument("--list-versions", action="store_true",
                     help="just print the game-version id and exit (token check)")
     ap.add_argument("--verify", action="store_true",
@@ -220,6 +248,21 @@ def main():
         sys.exit("--project-id and --file are required (or use --list-versions).")
     if not os.path.isfile(args.file):
         sys.exit(f"file not found: {args.file}")
+
+    # Anti-duplicate guard (protects EVERY caller, not just release_mods): refuse if the project
+    # already has this exact file, unless --force. Skipped for --dry-run (no POST happens anyway).
+    if not args.force and not args.dry_run:
+        key = read_api_key()
+        if key:
+            dup = find_existing_file(args.project_id, args.display_name,
+                                     os.path.basename(args.file), key)
+            if dup:
+                sys.exit(f"[cf-upload] REFUSING: project {args.project_id} already has a matching "
+                         f"file (id {dup.get('id')}, displayName {dup.get('displayName')!r}, "
+                         f"fileName {dup.get('fileName')!r}). Pass --force to upload anyway.")
+        else:
+            print("[cf-upload] WARN: no CF_API_KEY read key — cannot check for an existing "
+                  "duplicate; proceeding (last-line guard is off).")
 
     changelog = args.changelog
     if args.changelog_file:
