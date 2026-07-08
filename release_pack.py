@@ -301,6 +301,36 @@ def thirdparty_gate():
           "(Approved-only), re-run. Pass --skip-modcheck to bypass this gate.)")
 
 
+def drift_gate(strict):
+    """GATE 7 (hole #7): run bundle_drift.py — does the TEST instance's mods/ match what the
+    canonical bundles DECLARE, BOTH ways (undeclared additions + removals)? A stale/hand-edited test
+    instance can smoke/boot-test a binary set that never ships. bundle_drift exits 1 on HARD drift
+    (an undeclared jar OR a declared jar missing); 0 if clean or only a version swap. Report-only by
+    default (drift is often intentional test state — swapped local builds); --strict-drift hard-fails."""
+    print("\n=== GATE 7 (bundle drift): bundle_drift.py --instance TEST (instance mods/ vs bundles)")
+    proc = subprocess.run([sys.executable, str(HERE / "bundle_drift.py"), "--instance", "TEST"],
+                          capture_output=True, text=True)
+    out = (proc.stdout or "") + (proc.stderr or "")
+    lines = out.splitlines()
+    # echo the section headers + the verdict tail (the per-jar lists can be long)
+    for ln in lines:
+        if re.match(r"^\s*[+\-~.] ", ln) or ln.startswith(("UNDECLARED", "REMOVALS", "VERSION DRIFT",
+                                                            "DECLARED-BUT", "DRIFT —", "IN SYNC")):
+            print("   " + ln.rstrip())
+    if proc.returncode == 0:
+        print("  no undeclared additions or removals — TEST instance matches the declared set ✓")
+        return
+    # returncode 1 = hard drift (also covers a bundle_drift error; the tail above shows which)
+    if strict:
+        print(out[-1200:])
+        sys.exit("⛔ GATE 7 (--strict-drift): the TEST instance does NOT match the declared bundles "
+                 "(undeclared addition or removal) — reconcile mods/ (update_local.py / mod-director) "
+                 "then re-run.")
+    print("  (WARNING only — drift is often intentional test state, e.g. a locally-built jar swapped "
+          "in. Confirm you are smoke-testing the mods players will actually get. Pass --strict-drift "
+          "to hard-fail here.)")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Gated modpack release pipeline.")
     ap.add_argument("--version", help="pack version to ship, e.g. 1.1.9 (no V prefix). Default: AUTO "
@@ -314,6 +344,10 @@ def main():
                     help="GATE 5: hard-fail on config drift (default: report as a warning gate)")
     ap.add_argument("--skip-modcheck", action="store_true",
                     help="GATE 6: skip the third-party mod staleness gate (mod_update_checker)")
+    ap.add_argument("--skip-drift", action="store_true",
+                    help="GATE 7: skip the instance<->bundle drift check (bundle_drift)")
+    ap.add_argument("--strict-drift", action="store_true",
+                    help="GATE 7: hard-fail on instance/bundle drift (default: report as a warning)")
     ap.add_argument("--boot-verify", action="store_true",
                     help="GATE 4b: boot the pack TEST instance + scan the boot log before shipping "
                          "(refuse on fatal). OFF by default — full pack boots ~8 min; boots the "
@@ -378,6 +412,12 @@ def main():
         print("\n=== GATE 6 (third-party staleness): SKIPPED (--skip-modcheck)")
     else:
         thirdparty_gate()
+
+    # GATE 7 — instance<->bundle drift (hole #7): does the TEST instance test what actually ships?
+    if args.skip_drift:
+        print("\n=== GATE 7 (bundle drift): SKIPPED (--skip-drift)")
+    else:
+        drift_gate(args.strict_drift)
 
     # step 5 — changelog
     if args.changelog_file:
