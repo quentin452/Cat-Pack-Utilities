@@ -16,6 +16,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import sys
 import urllib.request
 
@@ -23,6 +24,17 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 API = "https://api.modrinth.com/v2"
 DEFAULT_GAME_VERSION = "1.7.10"
 DEFAULT_LOADER = "forge"
+
+
+def normalize_modrinth_version(version, version_format="strip-v"):
+    """CONCERN B — the SINGLE source of truth for a version's Modrinth form, so the upload and the
+    idempotency dedup (release_mods.publish_plan) always agree. Modrinth projects use a bare number
+    ('1.17.1') while GitHub/CF use 'V1.17.5'; uploading 'V…' would break the Modrinth convention AND
+    defeat the version_number dedup. Default strips a leading V/v; 'keep' leaves it (for a project
+    that wants the V)."""
+    if version_format == "keep":
+        return version
+    return re.sub(r"^[Vv]", "", str(version))
 
 
 def load_token():
@@ -92,6 +104,8 @@ def main():
     ap.add_argument("--game-version", default=DEFAULT_GAME_VERSION)
     ap.add_argument("--loader", default=DEFAULT_LOADER)
     ap.add_argument("--release-type", default="release", choices=["release", "beta", "alpha"])
+    ap.add_argument("--version-format", default="strip-v", choices=["strip-v", "keep"],
+                    help="Modrinth version_number form: strip-v (default, drop a leading V) or keep")
     ap.add_argument("--changelog", default="")
     ap.add_argument("--changelog-file")
     ap.add_argument("--dry-run", action="store_true")
@@ -113,9 +127,15 @@ def main():
     if args.changelog_file:
         changelog = open(args.changelog_file, encoding="utf-8").read()
 
+    # Normalize to the Modrinth version form (strip a leading V by default) — shared helper so this
+    # matches the dedup in release_mods.publish_plan.
+    mr_version = normalize_modrinth_version(args.version, args.version_format)
+    if mr_version != args.version:
+        print(f"[modrinth] version {args.version} -> {mr_version} (version-format={args.version_format})")
+
     data = {
-        "name": args.name or args.version,
-        "version_number": args.version,
+        "name": args.name or mr_version,
+        "version_number": mr_version,
         "changelog": changelog,
         "dependencies": [],
         "game_versions": [args.game_version],
@@ -132,7 +152,7 @@ def main():
     body, boundary = encode_multipart(json.dumps(data), os.path.basename(args.file), file_bytes)
 
     print(f"[modrinth] project {args.project}  file {os.path.basename(args.file)} "
-          f"({len(file_bytes)} bytes)  version {args.version}")
+          f"({len(file_bytes)} bytes)  version {mr_version}")
     if args.dry_run:
         print(f"[modrinth] data: {json.dumps(data)}")
         print("[modrinth] --dry-run: not POSTing.")

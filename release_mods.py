@@ -43,6 +43,7 @@ import urllib.request
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 import make_minimal_instance as mmi  # noqa: E402 — reuse poll_boot/kill_instance/INSTANCES/JAVA
+from modrinth_upload import normalize_modrinth_version  # noqa: E402 — CONCERN B: shared strip-V
 
 CF_READ_API = "https://api.curseforge.com"       # read API (CF_API_KEY) — existence checks only
 MODRINTH_API = "https://api.modrinth.com/v2"
@@ -287,16 +288,20 @@ def publish_plan(mod, version, slug, cf_api_key, force, force_cf):
 
     if mod.get("modrinth"):
         proj = mod["modrinth"]["project"]
+        # CONCERN B: Modrinth uses a bare version ('1.17.1'); strip the leading V so BOTH the dedup
+        # probe AND the upload compare the same string (default strip-v; per-mod override).
+        mr_fmt = mod["modrinth"].get("version_format", "strip-v")
+        mr_ver = normalize_modrinth_version(version, mr_fmt)
         if force:
-            plan["Modrinth"] = ("publish", "forced (--force)")
+            plan["Modrinth"] = ("publish", f"forced (--force); as {mr_ver}")
         else:
-            exists = modrinth_version_exists(proj, version)
+            exists = modrinth_version_exists(proj, mr_ver)
             if exists is True:
-                plan["Modrinth"] = ("skip", f"Modrinth {version} already exists")
+                plan["Modrinth"] = ("skip", f"Modrinth {mr_ver} already exists")
             elif exists is False:
-                plan["Modrinth"] = ("publish", None)
+                plan["Modrinth"] = ("publish", f"as {mr_ver}")
             else:  # public API; None = transient error -> attempt (Modrinth rejects true dupes itself)
-                plan["Modrinth"] = ("publish", "could not verify Modrinth — will attempt")
+                plan["Modrinth"] = ("publish", f"as {mr_ver}; could not verify Modrinth — will attempt")
     return plan
 
 
@@ -729,8 +734,13 @@ def release_one(mod, execute, skip_build, changelog_override=None, force=False, 
             mr = mod["modrinth"]
             mr_action, mr_note = plan["Modrinth"]
             if mr_action == "publish":
+                # Pass the normalized version + the format; modrinth_upload re-applies the same shared
+                # helper (idempotent), so the uploaded version_number matches the dedup probe exactly.
+                mr_fmt = mr.get("version_format", "strip-v")
                 run(["python3", os.path.join(SCRIPT_DIR, "modrinth_upload.py"),
-                     "--project", mr["project"], "--file", jar, "--version", version,
+                     "--project", mr["project"], "--file", jar,
+                     "--version", normalize_modrinth_version(version, mr_fmt),
+                     "--version-format", mr_fmt,
                      "--game-version", mr.get("game_version", "1.7.10"),
                      "--release-type", "release", "--changelog-file", notes], capture=False)
                 log("Modrinth upload done")
