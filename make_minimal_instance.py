@@ -219,6 +219,8 @@ def main():
     ap.add_argument("--autoworld", default="default", choices=["default", "superflat"])
     ap.add_argument("--pack", default=PACK, help="source instance for mod jars")
     ap.add_argument("--boot", action="store_true", help="boot + heal missing deps after assembling")
+    ap.add_argument("--sound", action="store_true",
+                    help="keep game sound ON (default: OFF — test instances don't need music/sound)")
     ap.add_argument("--heal-max", type=int, default=6, help="max heal reboots")
     args = ap.parse_args()
 
@@ -278,6 +280,26 @@ def main():
             print("  WARN: extra not found, skipping:", sub)
 
     dest_arg = build_argfile(os.path.join(BASE, "minimal.arg"), dest, args.autoworld)
+
+    # Sound OFF by default (test instances don't need music/sound; --sound keeps it). Seed options.txt
+    # from BASE if absent, then force the sound categories to 0.0 so the boot is silent.
+    if not args.sound:
+        opt = os.path.join(dest, "options.txt")
+        base_opt = os.path.join(BASE, "options.txt")
+        if not os.path.isfile(opt) and os.path.isfile(base_opt):
+            shutil.copy(base_opt, opt)
+        off = {"soundCategory_master": "0.0", "soundCategory_music": "0.0"}
+        lines = open(opt, encoding="utf-8").read().splitlines() if os.path.isfile(opt) else []
+        seen = set()
+        for i, ln in enumerate(lines):
+            k = ln.split(":", 1)[0]
+            if k in off:
+                lines[i] = k + ":" + off[k]
+                seen.add(k)
+        lines += [k + ":" + v for k, v in off.items() if k not in seen]
+        with open(opt, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+        print("  sound OFF (master+music=0.0; pass --sound to keep)")
 
     print("\nAssembled %s:" % dest)
     for p in picked:
