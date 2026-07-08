@@ -105,6 +105,101 @@ def read_env(key):
     return None
 
 
+# --- auto-versioning: derive the NEXT release version from git tags ---------------------------
+# CONCERN A: the manifest `version` literal goes stale (a released version stays named -> the
+# idempotency guard below would SKIP and the pending commits would never ship, e.g. OaT V1.17.5).
+# So DERIVE the next version from the latest release tag on the branch + a bump, unless the author
+# pins (bump=none) or overrides it (a not-yet-tagged version ahead of the latest tag).
+
+FORK_RE = re.compile(r"^(?P<base>.+-fork)(?P<n>\d+)$", re.I)          # <upstream>-fork<N>
+SEMVER_RE = re.compile(r"^(?P<prefix>[Vv]?)(?P<nums>\d+(?:\.\d+)*)(?P<suffix>.*)$")  # [V]x.y.z[suffix]
+
+
+def _style_sig(v):
+    """A version's STYLE signature, so we only compare a mod's OWN tag family. A fork repo also
+    carries upstream semver tags (0.7.11 vs 0.7.11-fork4); a -CAT fork also carries -GTNH tags.
+    Same sig = same lineage — this is what makes 'the latest tag on the branch' the right one."""
+    if not v:
+        return None
+    if FORK_RE.match(v):
+        return ("fork",)                       # any <base>-fork<N>
+    m = SEMVER_RE.match(v)
+    if m:
+        return ("semver", m.group("prefix").upper(), m.group("suffix"))
+    return ("other", v)
+
+
+def bump_version(ver, bump="patch"):
+    """Compute the NEXT version, preserving STYLE. Fork <base>-fork<N> -> N+1 (single axis). Dotted
+    [V]x.y.z[suffix]: patch bumps the last number, minor the 2nd-to-last, major the first (zeroing
+    the components after the bumped one). The V prefix and any trailing suffix (e.g. -CAT) survive."""
+    m = FORK_RE.match(ver)
+    if m:
+        return f"{m.group('base')}{int(m.group('n')) + 1}"
+    m = SEMVER_RE.match(ver)
+    if not m:
+        raise ValueError(f"cannot bump unrecognized version style: {ver!r}")
+    prefix, suffix = m.group("prefix"), m.group("suffix")
+    nums = [int(x) for x in m.group("nums").split(".")]
+    n = len(nums)
+    idx = 0 if bump == "major" else max(0, n - 2) if bump == "minor" else n - 1  # else patch
+    nums[idx] += 1
+    for j in range(idx + 1, n):
+        nums[j] = 0
+    return prefix + ".".join(str(x) for x in nums) + suffix
+
+
+def _latest_style_tag(repo, ref_version):
+    """Latest release tag reachable from HEAD whose STYLE matches ref_version (the manifest literal
+    is the lineage marker). None if none match."""
+    sig = _style_sig(ref_version)
+    out = git(repo, "tag", "--merged", "HEAD", "--sort=-creatordate", check=False)
+    for t in out.splitlines():
+        t = t.strip()
+        if t and _style_sig(t) == sig:
+            return t
+    return None
+
+
+def resolve_version(mod, repo, log):
+    """CONCERN A: choose the NEXT version to release from git, not a stale manifest literal.
+    Returns (version, skip_reason). skip_reason set (version None) = 'nothing to release'.
+
+    Rules:
+      - bump == 'none'  -> PIN: use the manifest version verbatim (deliberate re-release over the
+        SAME tag, e.g. EssenceOfTheGods keeping its url.bundle pin).
+      - manifest version is a NOT-YET-TAGGED value that differs from the latest tag -> OVERRIDE
+        (a real minor/major the author wants): use it verbatim.
+      - else AUTO: latest style-matched tag + a bump (default patch, or the `bump` hint). HEAD ==
+        that tag (0 new commits) -> nothing to release, skip (idempotent)."""
+    name = mod["name"]
+    manifest_ver = mod.get("version")
+    bump = mod.get("bump", "patch")
+    if bump == "none":
+        log(f"auto-version: {name} PINNED at {manifest_ver} (bump=none — re-release over same tag)")
+        return manifest_ver, None
+    latest = _latest_style_tag(repo, manifest_ver)
+    if not latest:
+        log(f"auto-version: {name} no prior tag in this version style — using manifest {manifest_ver} "
+            f"(cannot derive a next)")
+        return manifest_ver, None
+    # explicit override: a manifest version the author bumped ahead by hand and hasn't tagged yet
+    if manifest_ver and manifest_ver != latest and not git(repo, "tag", "-l", manifest_ver):
+        log(f"auto-version: {name} using manifest OVERRIDE {manifest_ver} (explicit; latest tag {latest})")
+        return manifest_ver, None
+    commits_since = git(repo, "rev-list", "--count", f"{latest}..HEAD", check=False) or "0"
+    if commits_since == "0":
+        return None, f"HEAD == latest tag {latest} — no new commits, nothing to release"
+    try:
+        nxt = bump_version(latest, bump)
+    except ValueError as e:
+        log(f"auto-version: {name} {e} — falling back to manifest {manifest_ver}")
+        return manifest_ver, None
+    log(f"auto-version: {name} {latest} -> {nxt} ({commits_since} commits since tag"
+        + (f", {bump} bump" if bump != "patch" else "") + ")")
+    return nxt, None
+
+
 # --- idempotency: read-only "already published?" probes per target ---------------------------
 # These make a re-run of an already-released version a no-op instead of a duplicate upload
 # (gh release create would error; cf_upload would post a DUPLICATE file — there is no dedupe on CF).
@@ -160,11 +255,11 @@ def modrinth_version_exists(project, version):
     return any(str(v.get("version_number")) == str(version) for v in versions)
 
 
-def publish_plan(mod, slug, cf_api_key, force, force_cf):
+def publish_plan(mod, version, slug, cf_api_key, force, force_cf):
     """Read-only per-target plan so dry-run and execute agree and neither duplicates. Returns
     {target: (action, note)} with action in {'publish','skip'}. Targets: 'GitHub' always; 'CF' and
-    'Modrinth' only if configured."""
-    version = mod["version"]
+    'Modrinth' only if configured. `version` is the RESOLVED version (auto-derived), not the raw
+    manifest literal."""
     plan = {}
 
     # GitHub — always a target. gh itself refuses a duplicate tag, so on exists we ALWAYS skip
@@ -474,13 +569,20 @@ def release_one(mod, execute, skip_build, changelog_override=None, force=False, 
                 cf_api_key=None, skip_boot=False):
     name = mod["name"]
     repo = os.path.expanduser(mod["repo"])
-    version = mod["version"]
     log = lambda m: print(f"  [{name}] {m}")
-    print(f"=== {name}  ->  {version} ===")
 
     if not os.path.isdir(os.path.join(repo, ".git")):
+        print(f"=== {name} ===")
         log(f"SKIP: not a git repo: {repo}")
         return False
+
+    # Auto-version (CONCERN A): derive the NEXT version from git tags, not the stale manifest literal.
+    version, skip_reason = resolve_version(mod, repo, log)
+    if skip_reason:
+        print(f"=== {name}  ->  (up to date) ===")
+        log(skip_reason + " — SKIP")
+        return True
+    print(f"=== {name}  ->  {version} ===")
 
     # Gate 1: clean tree (ignoring build-touched noise)
     dirty = dirty_paths(repo, mod.get("ignore_dirty", []))
@@ -578,7 +680,7 @@ def release_one(mod, execute, skip_build, changelog_override=None, force=False, 
     # Idempotency: probe every target read-only so a re-run skips what is already published
     # (no duplicate GitHub release / CF file / Modrinth version) instead of erroring or duplicating.
     slug = origin_slug(repo)
-    plan = publish_plan(mod, slug, cf_api_key, force, force_cf)
+    plan = publish_plan(mod, version, slug, cf_api_key, force, force_cf)
 
     if not execute:
         for tgt, (action, note) in plan.items():

@@ -85,6 +85,52 @@ def cf_read_key():
     return None
 
 
+def _bump_patch(ver):
+    """Increment the trailing dotted component (1.1.10 -> 1.1.11)."""
+    nums = [int(x) for x in ver.split(".")]
+    nums[-1] += 1
+    return ".".join(str(x) for x in nums)
+
+
+def latest_pack_cut(pack_repo):
+    """CONCERN A: (version, commit) of the latest 'release: cut V<ver>' commit on the pack repo, or
+    (None, None). That commit = the last PUBLISHED pack state -> its version is what shipped (auto
+    --version base) and its commit is the correct changelog --baseline for the next release."""
+    out = subprocess.run(["git", "-C", str(pack_repo), "log", "--grep=release: cut V",
+                          "-1", "--format=%H%x09%s"], capture_output=True, text=True).stdout.strip()
+    if not out:
+        return None, None
+    commit, _, subj = out.partition("\t")
+    m = re.search(r"release: cut V([0-9]+(?:\.[0-9]+)*)", subj)
+    return (m.group(1) if m else None), commit
+
+
+def latest_cf_pack_version(project_id):
+    """Highest V<x.y.z> already published on the CF pack project — fallback for auto --version when
+    there is no local 'release: cut' commit. None if unverifiable (no read key / API error)."""
+    key = cf_read_key()
+    if not key:
+        return None
+    url = f"{CF_READ_API}/v1/mods/{project_id}/files?pageSize=50"
+    req = urllib.request.Request(url, method="GET")
+    req.add_header("x-api-key", key)
+    req.add_header("Accept", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            files = json.load(r).get("data", [])
+    except Exception:
+        return None
+    best = None
+    for f in files:
+        for field in ("displayName", "fileName"):
+            m = re.search(r"V([0-9]+(?:\.[0-9]+)+)", str(f.get(field, "")))
+            if m:
+                t = tuple(int(x) for x in m.group(1).split("."))
+                if best is None or t > best[0]:
+                    best = (t, m.group(1))
+    return best[1] if best else None
+
+
 def pack_already_published(project_id, version):
     """Return the CF file that already carries V<version> for this pack (dict), False if none, or
     None if UNVERIFIABLE (no read key / API error). Guards against re-shipping a live pack version."""
@@ -198,9 +244,10 @@ def pack_boot_verify():
 
 def main():
     ap = argparse.ArgumentParser(description="Gated modpack release pipeline.")
-    ap.add_argument("--version", required=True, help="pack version to ship, e.g. 1.1.9 (no V prefix)")
-    ap.add_argument("--baseline", required=True,
-                    help="git ref of the LAST PUBLISHED pack version (changelog derive base)")
+    ap.add_argument("--version", help="pack version to ship, e.g. 1.1.9 (no V prefix). Default: AUTO "
+                    "= last published cut version + patch bump (CONCERN A)")
+    ap.add_argument("--baseline", help="git ref of the LAST PUBLISHED pack version (changelog derive "
+                    "base). Default: AUTO = the commit of the last 'release: cut V…' (CONCERN A)")
     ap.add_argument("--changelog-file", type=Path,
                     help="hand-curated derive-markdown; default = raw derive output")
     ap.add_argument("--skip-audit", action="store_true", help="skip the fork-staleness audit gate")
@@ -214,6 +261,23 @@ def main():
                     help="ship even if CF already has a file for V<version> (default: REFUSE to "
                          "avoid re-shipping a live pack version)")
     args = ap.parse_args()
+
+    # CONCERN A — auto-version / auto-baseline when not given explicitly (no more hand-set stale
+    # values). Explicit flags still override. Both default off the last 'release: cut V…' commit.
+    cut_ver, cut_commit = latest_pack_cut(PACK_REPO)
+    if not args.version:
+        base_ver = cut_ver or latest_cf_pack_version(args.project_id)
+        if not base_ver:
+            sys.exit("could not auto-derive --version (no 'release: cut V…' commit and no CF read "
+                     "key) — pass --version explicitly.")
+        args.version = _bump_patch(base_ver)
+        src = "last cut" if cut_ver else "CF published"
+        print(f"=== auto-version: pack V{base_ver} -> V{args.version} ({src} + patch bump)")
+    if not args.baseline:
+        if not cut_commit:
+            sys.exit("could not auto-derive --baseline (no 'release: cut V…' commit) — pass --baseline.")
+        args.baseline = cut_commit
+        print(f"=== auto-baseline: {cut_commit[:9]} (last 'release: cut' commit)")
 
     if not re.fullmatch(r"[0-9]+(\.[0-9]+)*", args.version):
         sys.exit(f"--version must be a plain dotted number (got {args.version!r})")
