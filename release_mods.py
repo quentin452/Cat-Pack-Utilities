@@ -9,6 +9,10 @@ Per mod, with SAFETY GATES first (nothing is released if a gate fails):
                              that is on origin, not only local)
   4. tag the version         (git tag <version>, local)
   5. COMPILE/BUILD pass       (build green + jar produced; on failure the tag is rolled back)
+  6. BOOT-VERIFY pass         (mods with a boot_test block: boot a fast minimal instance with the
+                             freshly built jar + scan the boot log — a mixin that compiles green can
+                             still throw InvalidInjectionException at APPLY time. FAIL -> no publish.
+                             Boots the game, so runs single-instance; --skip-boot bypasses it)
 Then release: push tag -> GitHub release (gh) -> CurseForge (cf_upload.py) -> Modrinth
 (modrinth_upload.py), each only if configured. Changelog = git commits since the previous tag.
 
@@ -17,8 +21,9 @@ DRY-RUN BY DEFAULT. Pass --execute to actually tag/push/publish.
 Usage:
   release_mods.py                     # dry-run all mods (gates + plan, no publish)
   release_mods.py --only OptimizationsAndTweaks
-  release_mods.py --execute           # for real
+  release_mods.py --execute           # for real (boots the minimal instance for boot-verify)
   release_mods.py --execute --skip-build   # trust an existing build (not recommended)
+  release_mods.py --execute --skip-boot    # bypass the boot-verify gate (not recommended)
 """
 
 import argparse
@@ -26,18 +31,28 @@ import glob
 import json
 import os
 import re
+import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, SCRIPT_DIR)
+import make_minimal_instance as mmi  # noqa: E402 — reuse poll_boot/kill_instance/INSTANCES/JAVA
+
 CF_READ_API = "https://api.curseforge.com"       # read API (CF_API_KEY) — existence checks only
 MODRINTH_API = "https://api.modrinth.com/v2"
 # The manifest (release plan) lives in the Mod-Sandbox hub (planning data, versioned +
 # auto-pushed, next to pipeline-mods.md). Override with --manifest.
 MANIFEST = os.path.expanduser("~/Documents/GitHub/Mod-Sandbox/memory/release-manifest.json")
+# BOOT-VERIFY gate helpers (sibling scripts, reused as subprocesses / a module).
+MMI_SCRIPT = os.path.join(SCRIPT_DIR, "make_minimal_instance.py")
+CRASH_SCAN = os.path.join(SCRIPT_DIR, "boot_crash_scan.py")
+BOOT_TIMEOUT = 300  # seconds to wait for the minimal instance to reach a world (~5 min)
 
 
 def run(cmd, cwd=None, env=None, check=True, capture=True):
@@ -259,8 +274,204 @@ def find_jar(repo, mod):
     return max(cands, key=os.path.getmtime)
 
 
+# --- BOOT-VERIFY gate --------------------------------------------------------------------------
+# Compile-green is NOT enough to ship: a mixin can compile yet throw InvalidInjectionException at
+# APPLY time and ship broken. This gate assembles a fast minimal instance (make_minimal_instance),
+# boots it with the FRESHLY BUILT jar, and scans the boot log (boot_crash_scan) for a fatal that is
+# attributable to THIS mod or to any mixin-apply failure. It BOOTS the game, so it obeys the
+# single-instance rule: kill any running MC first + confirm 0 (the JVM re-execs, so re-scan the
+# real `bin/java` procs each pass — never trust one kill). Live boot is meant to run on the MAIN
+# thread; dry-run only prints the plan (never boots).
+
+def _running_mc_pids():
+    """PIDs of live Minecraft JVMs (real `bin/java` procs, matched by the launch markers — not the
+    `ps` line of this scan itself, which has no `bin/java`)."""
+    out = subprocess.run(["ps", "-eo", "pid,args"], capture_output=True, text=True).stdout
+    pids = []
+    for line in out.splitlines():
+        if "bin/java" not in line:
+            continue
+        low = line.lower()
+        if ("curseforge/minecraft" in low or "minimal-derisk" in low
+                or "launchwrapper" in low or ".arg" in low):
+            try:
+                pids.append(int(line.split()[0]))
+            except (ValueError, IndexError):
+                pass
+    return pids
+
+
+def _kill_all_minecraft(log):
+    """Kill every running MC JVM then CONFIRM 0 (re-scan each pass; the JVM re-execs with a new
+    PID). Returns True once 0 is confirmed, False if it could not be cleared."""
+    pids = _running_mc_pids()
+    if not pids:
+        log("boot-verify: 0 MC process(es) running — clear to boot")
+        return True
+    log("boot-verify: killing %d running MC process(es) %s (single-instance)" % (len(pids), pids))
+    for _ in range(12):
+        for pid in _running_mc_pids():
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+        time.sleep(1)
+        if not _running_mc_pids():
+            log("boot-verify: confirmed 0 MC process(es)")
+            return True
+    log("boot-verify: WARN could not confirm 0 MC (%d left) — aborting gate" % len(_running_mc_pids()))
+    return False
+
+
+def _minimal_dest(name):
+    """The instance dir make_minimal_instance builds for --name <name> (same sanitization)."""
+    return os.path.join(mmi.INSTANCES, "Minimal-DeRisk-" + re.sub(r"[^\w.-]", "_", name))
+
+
+def _minimal_args(mod, jar, bt, name):
+    """Translate a manifest boot_test block into make_minimal_instance CLI args (WITHOUT --boot).
+    Returns (targets, args). targets = the --mod list (make_minimal requires >=1)."""
+    targets = bt.get("mod")
+    targets = targets if isinstance(targets, list) else ([targets] if targets else [])
+    args = ["--name", name, "--autoworld", bt.get("autoworld", "default")]
+    for m in targets:
+        args += ["--mod", m]
+    for e in bt.get("extra", []):
+        args += ["--extra", e]
+    if bt.get("use_oat") and jar:
+        args += ["--oat", jar]              # the built jar IS the OaT-under-test
+    if bt.get("pack"):
+        args += ["--pack", os.path.expanduser(bt["pack"])]
+    if bt.get("heal_max") is not None:
+        args += ["--heal-max", str(bt["heal_max"])]
+    return targets, args
+
+
+def _inject_built_jar(dest, targets, jar, log):
+    """Non-OaT case: replace the stale pack copy of the mod-under-test in the assembled instance
+    with the freshly built jar (make_minimal pulls the --mod target from the pack)."""
+    dest_mods = os.path.join(dest, "mods")
+    for tok in targets:
+        for p in glob.glob(os.path.join(dest_mods, "*.jar")):
+            if tok and tok.lower() in os.path.basename(p).lower():
+                os.remove(p)
+                log("  boot-verify: removed stale %s" % os.path.basename(p))
+    shutil.copy(jar, os.path.join(dest_mods, os.path.basename(jar)))
+    log("  boot-verify: injected freshly built %s" % os.path.basename(jar))
+
+
+def _boot_and_poll(dest):
+    """Boot an already-assembled instance and wait (reuses make_minimal_instance.poll_boot).
+    Returns 'world'|'deps'|'crash'|'timeout'."""
+    argfile = os.path.join(dest, "minimal.arg")
+    argname = "minimal.arg"
+    boot_log = os.path.join(dest, "boot.log")
+    mmi.kill_instance(argname)
+    with open(boot_log, "w") as lf:
+        subprocess.Popen([mmi.JAVA, "@" + argfile], cwd=dest, stdout=lf, stderr=lf,
+                         stdin=subprocess.DEVNULL, start_new_session=True)
+    return mmi.poll_boot(dest, argname, timeout=BOOT_TIMEOUT)
+
+
+def scan_boot_log(boot_log, mod, bt, log):
+    """Run boot_crash_scan on a boot log and decide PASS/FAIL. PASS = reached world/menu with no
+    fatal. FAIL = a fatal attributable to THIS mod (culprit modid) OR any mixin-apply failure
+    (InvalidInjectionException / 'apply failed' / 'was not applied' / critical injection). A fatal
+    blamed on an UNRELATED pack mod (a minimal-instance dep gap, not our code) is a loud WARN, not
+    a blocker. A clean-but-never-reached-world boot is UNVERIFIED -> fail-safe FAIL. Isolated so the
+    main thread can call it directly on any existing boot log."""
+    target = boot_log if os.path.isfile(boot_log) else os.path.dirname(boot_log)
+    out, code = run(["python3", CRASH_SCAN, target], check=False)
+    for ln in out.splitlines():
+        if ln.strip():
+            print("      " + ln)
+    low = out.lower()
+    if code != 0:  # boot_crash_scan flagged a fatal
+        mixin_fatal = any(s in low for s in ("invalidinjection", "critical injection",
+                          "apply failed", "was not applied", "mixin failures"))
+        token = re.sub(r"[^a-z0-9]", "", (bt.get("modid") or mod["name"]).lower())
+        if mixin_fatal or (token and token in re.sub(r"[^a-z0-9]", "", low)):
+            log("boot-verify: FATAL is a mixin-apply failure / attributed to THIS mod — GATE FAIL")
+            return False
+        log("boot-verify: WARN boot has a FATAL but it is NOT attributed to this mod (likely a "
+            "minimal-instance dependency gap) — not blocking; inspect %s" % boot_log)
+        return True
+    if ":: ok ==" in low:  # boot_crash_scan tags OK only when a client/world success marker hit
+        log("boot-verify: PASS — booted to world/menu, mixins applied, no fatal captured")
+        return True
+    log("boot-verify: UNVERIFIED — no fatal but boot did not reach a world (INCONCLUSIVE); "
+        "fail-safe GATE FAIL. Inspect %s" % boot_log)
+    return False
+
+
+def boot_verify(mod, jar, execute, skip_boot, log):
+    """Gate: the mod must actually BOOT (mixins applied, no crash) before it is published.
+    Returns True to allow publish, False to block it. dry-run prints the plan without booting."""
+    if skip_boot:
+        log("boot-verify: SKIPPED (--skip-boot)")
+        return True
+    bt = mod.get("boot_test")
+    if not bt:
+        log("boot-verify: no boot_test config in manifest — gate SKIPPED (add a boot_test block "
+            "to enable apply-time verification for this mod)")
+        return True
+    name = "release-verify-" + re.sub(r"[^\w.-]", "-", mod["name"])
+    dest = _minimal_dest(name)
+    boot_log = os.path.join(dest, "boot.log")
+    targets, mm_args = _minimal_args(mod, jar, bt, name)
+    if not targets:
+        log("boot-verify: boot_test has no 'mod' target (make_minimal requires one) — gate SKIPPED")
+        return True
+    use_oat = bool(bt.get("use_oat"))
+
+    if not execute:
+        log("[dry-run] boot-verify plan (gate ON; boots the game — run live via the main thread):")
+        log("  1. kill %d running MC process(es) + confirm 0" % len(_running_mc_pids()))
+        if use_oat:
+            log("  2. python3 make_minimal_instance.py %s --boot" % " ".join(mm_args))
+        else:
+            log("  2. python3 make_minimal_instance.py %s   (assemble only)" % " ".join(mm_args))
+            log("     then inject freshly built %s over the pack copy, then boot + poll"
+                % (os.path.basename(jar) if jar else "<jar>"))
+        log("  3. boot_crash_scan %s  (FAIL on InvalidInjectionException / mixin-apply failure / "
+            "culprit=this mod; PASS on world reached + no fatal)" % boot_log)
+        return True
+
+    # --- EXECUTE: BOOTS the game (single-instance). Run by the main thread. ---
+    if jar is None:
+        log("boot-verify: no jar located — cannot boot-verify; GATE FAIL")
+        return False
+    if not _kill_all_minecraft(log):
+        return False
+    if use_oat:
+        # make_minimal --boot = assemble + boot + heal missing deps (full reuse), writes boot.log.
+        log("boot-verify: booting minimal instance via make_minimal_instance --boot (~90s-5min)…")
+        try:
+            subprocess.run(["python3", MMI_SCRIPT] + mm_args + ["--boot"],
+                           timeout=BOOT_TIMEOUT + 120)
+        except subprocess.TimeoutExpired:
+            log("boot-verify: make_minimal_instance --boot timed out — killing + scanning partial log")
+        except Exception as e:
+            log("boot-verify: make_minimal_instance error: %s" % e)
+            _kill_all_minecraft(log)
+            return False
+    else:
+        log("boot-verify: assembling minimal instance…")
+        _out, code = run(["python3", MMI_SCRIPT] + mm_args, check=False)
+        if code != 0:
+            log("boot-verify: assembly failed — GATE FAIL")
+            return False
+        _inject_built_jar(dest, targets, jar, log)
+        log("boot-verify: booting instance (poll_boot, ~90s-5min)…")
+        status = _boot_and_poll(dest)
+        log("boot-verify: poll_boot -> %s" % status)
+    ok = scan_boot_log(boot_log, mod, bt, log)
+    _kill_all_minecraft(log)  # never leave the gate's instance running
+    return ok
+
+
 def release_one(mod, execute, skip_build, changelog_override=None, force=False, force_cf=False,
-                cf_api_key=None):
+                cf_api_key=None, skip_boot=False):
     name = mod["name"]
     repo = os.path.expanduser(mod["repo"])
     version = mod["version"]
@@ -341,6 +552,13 @@ def release_one(mod, execute, skip_build, changelog_override=None, force=False, 
         if execute:
             return False
         jar = None
+
+    # Gate 6: BOOT-VERIFY — the mod must actually BOOT (mixins applied, no crash) before publish.
+    # Compile-green is not enough: a mixin can compile yet throw InvalidInjectionException at
+    # apply-time. On failure the release for THIS mod is skipped (tag/build stay; publish does not).
+    if not boot_verify(mod, jar, execute, skip_boot, log):
+        log("BOOT-VERIFY FAILED -> not publishing this mod")
+        return False
 
     # Changelog = commits since previous tag. Format as a markdown bullet list: raw subject lines
     # separated by single newlines collapse into ONE paragraph in markdown (CF/Modrinth/GitHub all
@@ -427,6 +645,9 @@ def main():
     ap.add_argument("--only", help="release only this mod name")
     ap.add_argument("--execute", action="store_true", help="actually tag/push/publish (default: dry-run)")
     ap.add_argument("--skip-build", action="store_true", help="trust an existing build")
+    ap.add_argument("--skip-boot", action="store_true",
+                    help="bypass the boot-verify gate (mixin apply-time check). Default: gate ON "
+                         "for any mod with a boot_test manifest block")
     ap.add_argument("--changelog-file", help="curated release notes (markdown); only with --only")
     ap.add_argument("--force", action="store_true",
                     help="publish to EVERY configured target even if it already has this version "
@@ -480,7 +701,8 @@ def main():
     for m in ready:
         try:
             if release_one(m, args.execute, args.skip_build, changelog_override=override,
-                           force=args.force, force_cf=args.force_cf, cf_api_key=cf_api_key):
+                           force=args.force, force_cf=args.force_cf, cf_api_key=cf_api_key,
+                           skip_boot=args.skip_boot):
                 done += 1
         except Exception as e:
             print(f"  [{m['name']}] ERROR: {e}")

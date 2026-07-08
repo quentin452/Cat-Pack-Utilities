@@ -12,6 +12,9 @@ references is actually deliverable:
   GATE 4  bundle_check.py             — EVERY bundle mod fetchable (CF: Approved + CDN 200;
                                         URLs: 200) AND client manifest files[] all Approved.
                                         This is the "valid url / approved mods" ship gate.
+  GATE 4b boot-verify [--boot-verify] — OPT-IN (OFF by default, full pack boots ~8 min): boot the
+                                        pack TEST instance + boot_crash_scan the fresh log; refuse
+                                        to zip/upload on a fatal (compile-green != apply-green).
   step 5  changelog derive            — changelog_from_bundles.py <baseline>..HEAD --markdown
                                         (or --changelog-file for hand-curated wording)
   step 6  build zips [--execute]      — generate_modpack_zips.py <version> (bumps manifest+modpack.json)
@@ -37,6 +40,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import urllib.request
 from pathlib import Path
 
@@ -47,6 +51,13 @@ PACK_DIR = PACK_REPO / "MODPACKS/Biggess Pack Cat Edition"
 DIST = PACK_DIR / "dist"
 PACK_PROJECT_ID = 830694          # CF modpack project (biggess-pack-cat-edition)
 GAME_VERSION = "1.7.10"
+# --boot-verify gate: boot the pack TEST instance + scan the boot log before shipping.
+PACK_TEST_INSTANCE = Path.home() / "Documents/curseforge/minecraft/Instances/Biggess Pack Cat Edition V1 TEST"
+PACK_TEST_ARGFILE = "pack-worldgen.arg"   # auto-into-a-world argfile in the TEST instance
+PACK_BOOT_LOG = "boot-relverify.log"      # dedicated fresh log (the instance keeps many boot-*.log)
+JAVA = "/usr/lib/jvm/default-runtime/bin/java"
+CRASH_SCAN = HERE / "boot_crash_scan.py"
+PACK_BOOT_TIMEOUT = 660                    # the full pack boots in ~8 min
 
 
 def run(cmd, gate, cwd=None, capture=False):
@@ -98,6 +109,93 @@ def pack_already_published(project_id, version):
     return False
 
 
+def _running_mc_pids():
+    """PIDs of live Minecraft JVMs (real `bin/java` procs matched by launch markers)."""
+    out = subprocess.run(["ps", "-eo", "pid,args"], capture_output=True, text=True).stdout
+    pids = []
+    for line in out.splitlines():
+        if "bin/java" not in line:
+            continue
+        low = line.lower()
+        if "curseforge/minecraft" in low or "launchwrapper" in low or ".arg" in low:
+            try:
+                pids.append(int(line.split()[0]))
+            except (ValueError, IndexError):
+                pass
+    return pids
+
+
+def _kill_all_minecraft():
+    """Single-instance discipline: kill every MC JVM then CONFIRM 0 (re-scan; the JVM re-execs)."""
+    if not _running_mc_pids():
+        print("  boot-verify: 0 MC process(es) running — clear to boot")
+        return True
+    print("  boot-verify: killing running MC %s (single-instance)" % _running_mc_pids())
+    import signal
+    for _ in range(12):
+        for pid in _running_mc_pids():
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+        time.sleep(1)
+        if not _running_mc_pids():
+            print("  boot-verify: confirmed 0 MC process(es)")
+            return True
+    print("  boot-verify: WARN could not confirm 0 MC — aborting gate")
+    return False
+
+
+def pack_boot_verify():
+    """GATE 4b (opt-in --boot-verify): boot the pack TEST instance and scan the boot log so a
+    compile-green-but-apply-broken mixin cannot ship. Refuses (sys.exit) on a fatal. OFF by default
+    (the full pack boots ~8 min). BOOTS the game -> single-instance -> run live on the MAIN thread;
+    in dry-run this still boots (it is a preflight), so the main thread drives it either way."""
+    argfile = PACK_TEST_INSTANCE / PACK_TEST_ARGFILE
+    boot_log = PACK_TEST_INSTANCE / PACK_BOOT_LOG
+    print("\n=== GATE 4b (--boot-verify): boot pack TEST instance + scan")
+    if not argfile.is_file():
+        sys.exit(f"⛔ GATE 4b: launch argfile not found: {argfile} — cannot boot-verify the pack. "
+                 f"Fix PACK_TEST_ARGFILE or drop --boot-verify.")
+    if not _kill_all_minecraft():
+        sys.exit("⛔ GATE 4b: could not clear running MC (single-instance) — aborting.")
+    print(f"  booting pack TEST via {argfile.name} (~8 min); log -> {boot_log.name}")
+    with open(boot_log, "w") as lf:
+        proc = subprocess.Popen([JAVA, "@" + str(argfile)], cwd=str(PACK_TEST_INSTANCE),
+                                stdout=lf, stderr=lf, stdin=subprocess.DEVNULL,
+                                start_new_session=True)
+    # Wait for a world / a fatal / process death / timeout — cheap poll of the fresh log.
+    reached = None
+    for _ in range(PACK_BOOT_TIMEOUT // 6):
+        if proc.poll() is not None:
+            reached = "process-exited"
+            break
+        try:
+            txt = boot_log.read_text(errors="ignore")
+        except OSError:
+            txt = ""
+        if re.search(r"reached the world|Sound engine started|Narrator library", txt):
+            reached = "world"
+            break
+        if re.search(r"A fatal error has occurred|Game crashed|has crashed", txt):
+            reached = "fatal"
+            break
+        time.sleep(6)
+    print(f"  boot poll -> {reached or 'timeout'}")
+    # Scan ONLY the fresh log (the instance holds many large boot-*.log we must not sweep).
+    proc_scan = subprocess.run([sys.executable, str(CRASH_SCAN), str(boot_log)],
+                               text=True, capture_output=True)
+    if proc_scan.stdout:
+        print(proc_scan.stdout)
+    _kill_all_minecraft()  # never leave the pack instance running
+    if proc_scan.returncode != 0:
+        sys.exit("⛔ GATE 4b: FATAL detected booting the pack — NOT releasing (fix + re-verify).")
+    if reached != "world":
+        sys.exit(f"⛔ GATE 4b: pack boot did not reach a world (status={reached or 'timeout'}) and "
+                 f"no fatal captured — UNVERIFIED; refusing to ship. Inspect {boot_log}.")
+    print("  GATE 4b: pack booted to a world, no fatal ✓")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Gated modpack release pipeline.")
     ap.add_argument("--version", required=True, help="pack version to ship, e.g. 1.1.9 (no V prefix)")
@@ -106,6 +204,10 @@ def main():
     ap.add_argument("--changelog-file", type=Path,
                     help="hand-curated derive-markdown; default = raw derive output")
     ap.add_argument("--skip-audit", action="store_true", help="skip the fork-staleness audit gate")
+    ap.add_argument("--boot-verify", action="store_true",
+                    help="GATE 4b: boot the pack TEST instance + scan the boot log before shipping "
+                         "(refuse on fatal). OFF by default — full pack boots ~8 min; boots the "
+                         "game so run single-instance on the main thread")
     ap.add_argument("--project-id", type=int, default=PACK_PROJECT_ID)
     ap.add_argument("--execute", action="store_true", help="build zips + upload to CF + publish changelog")
     ap.add_argument("--force", action="store_true",
@@ -134,6 +236,12 @@ def main():
 
     # GATE 4 — every shipped mod fetchable + manifest files[] Approved
     run([sys.executable, HERE / "bundle_check.py"], "GATE 4 (bundle fetchability + manifest Approved)")
+
+    # GATE 4b — OPT-IN boot-verify: the pack must actually BOOT (mixins applied, no crash)
+    if args.boot_verify:
+        pack_boot_verify()
+    else:
+        print("\n=== GATE 4b (boot-verify): SKIPPED (pass --boot-verify to boot the pack + scan)")
 
     # step 5 — changelog
     if args.changelog_file:
