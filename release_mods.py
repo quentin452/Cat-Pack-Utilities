@@ -44,6 +44,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 import make_minimal_instance as mmi  # noqa: E402 — reuse poll_boot/kill_instance/INSTANCES/JAVA
 from modrinth_upload import normalize_modrinth_version  # noqa: E402 — CONCERN B: shared strip-V
+from changelog_from_git import commit_type  # noqa: E402 — shared conventional-commit type classifier
 
 CF_READ_API = "https://api.curseforge.com"       # read API (CF_API_KEY) — existence checks only
 MODRINTH_API = "https://api.modrinth.com/v2"
@@ -150,6 +151,46 @@ def bump_version(ver, bump="patch"):
     return prefix + ".".join(str(x) for x in nums) + suffix
 
 
+BREAKING_BODY_RE = re.compile(r"BREAKING[ -]CHANGE", re.I)
+
+
+def derive_bump(repo, from_ref, to_ref="HEAD", log=None):
+    """Derive the semver bump level from conventional-commit types in `git log <from_ref>..<to_ref>`
+    (merges excluded). Reuses changelog_from_git.commit_type — the SAME classifier the pending
+    changelog uses, so 'what bump did we pick' and 'what does the changelog say' never disagree.
+
+      major - ANY commit has '!' before the colon (feat!:, fix(x)!:) OR a 'BREAKING CHANGE' /
+               'BREAKING-CHANGE' token in the body.
+      minor - else ANY 'feat:' / 'feat(scope):'.
+      patch - else (fix/perf/refactor/revert/config/security/build/chore/docs/test/style/ci/
+               unlabeled) — always at least patch, since there ARE commits in range (caller only
+               calls this when commits_since != 0).
+
+    `log`, if given, is called with a one-line reason (chosen level + what triggered it) — the
+    caller (resolve_version) doesn't have to re-derive the explanation."""
+    rng = f"{from_ref}..{to_ref}" if from_ref else to_ref
+    out = git(repo, "log", "--no-merges", "--format=%s%x00%b%x1e", rng, check=False)
+    records = [r for r in (out or "").split("\x1e") if r.strip("\n")]
+    major_hits, minor_hits = [], []
+    for rec in records:
+        subject, _, body = rec.partition("\x00")
+        subject = subject.strip()
+        typ, breaking = commit_type(subject)
+        if breaking or BREAKING_BODY_RE.search(body):
+            major_hits.append(subject)
+        elif typ == "feat":
+            minor_hits.append(subject)
+    if major_hits:
+        bump, why = "major", f"BREAKING in {len(major_hits)} commit(s), e.g. {major_hits[0]!r}"
+    elif minor_hits:
+        bump, why = "minor", f"feat: in {len(minor_hits)} commit(s), e.g. {minor_hits[0]!r}"
+    else:
+        bump, why = "patch", f"no feat/breaking among {len(records)} commit(s)"
+    if log:
+        log(f"derive_bump: {rng} -> {bump} ({why})")
+    return bump
+
+
 def _latest_style_tag(repo, ref_version):
     """Latest release tag reachable from HEAD whose STYLE matches ref_version (the manifest literal
     is the lineage marker). None if none match."""
@@ -171,11 +212,13 @@ def resolve_version(mod, repo, log):
         SAME tag, e.g. EssenceOfTheGods keeping its url.bundle pin).
       - manifest version is a NOT-YET-TAGGED value that differs from the latest tag -> OVERRIDE
         (a real minor/major the author wants): use it verbatim.
-      - else AUTO: latest style-matched tag + a bump (default patch, or the `bump` hint). HEAD ==
-        that tag (0 new commits) -> nothing to release, skip (idempotent)."""
+      - else AUTO: latest style-matched tag + a bump. bump ABSENT or 'auto' (the default) ->
+        DERIVE the level from conventional-commit types since that tag (derive_bump); an EXPLICIT
+        'patch'/'minor'/'major' in the manifest still overrides (the author's manual call wins).
+        HEAD == that tag (0 new commits) -> nothing to release, skip (idempotent)."""
     name = mod["name"]
     manifest_ver = mod.get("version")
-    bump = mod.get("bump", "patch")
+    bump = mod.get("bump", "auto")
     if bump == "none":
         log(f"auto-version: {name} PINNED at {manifest_ver} (bump=none — re-release over same tag)")
         return manifest_ver, None
@@ -191,13 +234,15 @@ def resolve_version(mod, repo, log):
     commits_since = git(repo, "rev-list", "--count", f"{latest}..HEAD", check=False) or "0"
     if commits_since == "0":
         return None, f"HEAD == latest tag {latest} — no new commits, nothing to release"
+    if bump == "auto":
+        bump = derive_bump(repo, latest, "HEAD", log=log)
+        log(f"auto-version: {name} bump=auto -> using derived '{bump}'")
     try:
         nxt = bump_version(latest, bump)
     except ValueError as e:
         log(f"auto-version: {name} {e} — falling back to manifest {manifest_ver}")
         return manifest_ver, None
-    log(f"auto-version: {name} {latest} -> {nxt} ({commits_since} commits since tag"
-        + (f", {bump} bump" if bump != "patch" else "") + ")")
+    log(f"auto-version: {name} {latest} -> {nxt} ({commits_since} commits since tag, {bump} bump)")
     return nxt, None
 
 

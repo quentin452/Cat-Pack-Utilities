@@ -107,6 +107,40 @@ def _bump_patch(ver):
     return ".".join(str(x) for x in nums)
 
 
+def _bundle_add_remove_count(pack_repo, old_ref, new_ref):
+    """(added, removed) mod-director bundle entry counts between two refs — a lightweight reuse of
+    changelog_from_bundles's parse/BUNDLES (the SAME ground truth the pack changelog derives from),
+    just counting instead of rendering. Used to force at least a minor bump on auto-version: a mod
+    add/remove is a real feature-level pack change even when every commit subject says 'config:' or
+    'chore:'."""
+    sys.path.insert(0, str(HERE))
+    from changelog_from_bundles import BUNDLES, CLIENT_MANIFEST, parse, parse_manifest, git_show
+    added = removed = 0
+    for path in BUNDLES + [CLIENT_MANIFEST]:
+        pfn = parse_manifest if path == CLIENT_MANIFEST else parse
+        old = pfn(git_show(str(pack_repo), old_ref, path))
+        new = pfn(git_show(str(pack_repo), new_ref, path))
+        added += sum(1 for k in new if k not in old)
+        removed += sum(1 for k in old if k not in new)
+    return added, removed
+
+
+def _auto_bump(pack_repo, base_ver, baseline_ref):
+    """Derive the pack's next version = base_ver + a bump derived from pack repo commits since
+    baseline_ref (reuses release_mods.derive_bump — same classifier as the mods side), with a mod
+    add/remove (bundle diff) forcing at least 'minor' even if every commit message undersells it.
+    Returns (next_version, bump_level, why)."""
+    sys.path.insert(0, str(HERE))
+    from release_mods import derive_bump, bump_version
+    bump = derive_bump(str(pack_repo), baseline_ref, "HEAD")
+    why = f"derived from commits since {baseline_ref[:9]}"
+    added, removed = _bundle_add_remove_count(pack_repo, baseline_ref, "HEAD")
+    if (added or removed) and bump == "patch":
+        bump = "minor"
+        why = f"bundle mods changed ({added} added, {removed} removed) — forced >= minor"
+    return bump_version(base_ver, bump), bump, why
+
+
 def latest_pack_cut(pack_repo):
     """CONCERN A: (version, commit) of the latest 'release: cut V<ver>' commit on the pack repo, or
     (None, None). That commit = the last PUBLISHED pack state -> its version is what shipped (auto
@@ -463,8 +497,10 @@ def drift_gate(strict):
 
 def main():
     ap = argparse.ArgumentParser(description="Gated modpack release pipeline.")
-    ap.add_argument("--version", help="pack version to ship, e.g. 1.1.9 (no V prefix). Default: AUTO "
-                    "= last published cut version + patch bump (CONCERN A)")
+    ap.add_argument("--version", help="pack version to ship, e.g. 1.1.9 (no V prefix), or 'auto' "
+                    "(also the default when omitted): last published cut version + a bump DERIVED "
+                    "from conventional-commit types since --baseline (feat -> minor, "
+                    "BREAKING/!  -> major, else patch; a bundle mod add/remove forces >= minor)")
     ap.add_argument("--baseline", help="git ref of the LAST PUBLISHED pack version (changelog derive "
                     "base). Default: AUTO = the commit of the last 'release: cut V…' (CONCERN A)")
     ap.add_argument("--changelog-file", type=Path,
@@ -506,14 +542,22 @@ def main():
     # CONCERN A — auto-version / auto-baseline when not given explicitly (no more hand-set stale
     # values). Explicit flags still override. Both default off the last 'release: cut V…' commit.
     cut_ver, cut_commit = latest_pack_cut(PACK_REPO)
-    if not args.version:
+    if not args.version or args.version == "auto":
         base_ver = cut_ver or latest_cf_pack_version(args.project_id)
         if not base_ver:
             sys.exit("could not auto-derive --version (no 'release: cut V…' commit and no CF read "
                      "key) — pass --version explicitly.")
-        args.version = _bump_patch(base_ver)
         src = "last cut" if cut_ver else "CF published"
-        print(f"=== auto-version: pack V{base_ver} -> V{args.version} ({src} + patch bump)")
+        if cut_commit:
+            # full derive: bump level from commit types since the last cut (+ bundle add/remove floor)
+            args.version, bump, why = _auto_bump(PACK_REPO, base_ver, cut_commit)
+            print(f"=== auto-version: pack V{base_ver} -> V{args.version} ({src} + {bump} bump, {why})")
+        else:
+            # no local baseline commit to diff from (e.g. fresh clone / never cut here) -> conservative
+            # patch-only fallback; TODO: derive from the CF-published changelog once that's queryable.
+            args.version = _bump_patch(base_ver)
+            print(f"=== auto-version: pack V{base_ver} -> V{args.version} ({src} + patch bump — no "
+                  f"local 'release: cut' commit to derive a bump level from)")
     if not args.baseline:
         if not cut_commit:
             sys.exit("could not auto-derive --baseline (no 'release: cut V…' commit) — pass --baseline.")

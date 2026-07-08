@@ -25,6 +25,21 @@ REPOS = os.path.expanduser("~/Documents/GitHub/Mod-Sandbox/memory/repos.json")
 # noise types dropped from the player-facing view by default
 SKIP = re.compile(r"^(chore|tests?|docs?|style|ci|build|refactor|wip|merge|bump)\b|\bwip\b", re.I)
 CO = re.compile(r"^Co-Authored-By", re.I)
+# Conventional-commit type extraction — the ONE shared classifier for a subject line, reused by
+# release_mods.derive_bump (auto semver bump) so the bump level and the changelog agree on what a
+# commit "is" instead of two parsers drifting apart.
+TYPE_RE = re.compile(r"^(?P<type>[a-zA-Z]+)(?:\([^)]*\))?(?P<breaking>!)?:\s", re.I)
+
+
+def commit_type(subject):
+    """Extract (type, breaking) from a conventional-commit subject, e.g. 'feat(x)!: …' -> ('feat',
+    True). type is None (breaking always False) if the subject doesn't match the conventional
+    '<type>[(scope)][!]: ' prefix — still a real commit, just unclassified (callers treat it as the
+    patch-level fallback)."""
+    m = TYPE_RE.match(subject)
+    if not m:
+        return None, False
+    return m.group("type").lower(), bool(m.group("breaking"))
 
 
 def git(repo, *args):
