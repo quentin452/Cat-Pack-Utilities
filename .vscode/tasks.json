@@ -250,6 +250,36 @@
       },
       "detail": "Regenerate wiki Mixins.md from asm/Mixin.java + mixin javadocs (kills the stale-wiki class). Review the diff, then commit+push the wiki clone yourself (PUBLIC).",
       "problemMatcher": []
+    },
+    {
+      "label": "Diag: OaT mixin collisions (pre-boot)",
+      "type": "shell",
+      "command": "python3 mixin_collision.py --severity-min HIGH",
+      "options": {
+        "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities"
+      },
+      "detail": "Cross-mod contested-target report: where OaT @Overwrite/@Redirect fights another pack mod on the same class/method (CRITICAL/HIGH). Static, ~10s cold / 0.1s cached. Catches collisions BEFORE an 8min boot. Add --json, --no-cache, or --severity-min LOW.",
+      "problemMatcher": []
+    },
+    {
+      "label": "Diag: dist parity (GH vs Modrinth/CF)",
+      "type": "shell",
+      "command": "python3 dist_parity.py",
+      "options": {
+        "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities"
+      },
+      "detail": "Read-only cross-platform release-parity for personal mods: flags GAP (GitHub ahead of an existing Modrinth/CF project) + UNMANAGED + HUB_LIST_DRIFT. Universe = hub 1.7.10.MD + repos.json + manifest. Publishes nothing. Run after any mod GH release + at release-session start.",
+      "problemMatcher": []
+    },
+    {
+      "label": "Release: mods dry-run (auto version+bump)",
+      "type": "shell",
+      "command": "python3 release_mods.py",
+      "options": {
+        "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities"
+      },
+      "detail": "Dry-run plan for the personal mods: auto-derives the next version from git tags AND the bump level from commit types (feat->minor, fix/perf->patch, feat!->major), prints the boot-verify plan. Read-only. Add --execute (uploads to GH/CF/Modrinth!) only after a full dry-run + user go.",
+      "problemMatcher": []
     }
   ]
 }
