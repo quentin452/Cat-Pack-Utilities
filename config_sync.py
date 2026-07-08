@@ -112,9 +112,34 @@ def rel_files(root, only):
 
 
 def copy_byte(src, dst):
-    """Byte copy: preserves CRLF (no LF normalization) + mtime. Shared by both directions."""
+    """Byte copy: preserves CRLF (no LF normalization) + mtime. Forward (canonical LF -> instance)."""
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     shutil.copy2(src, dst)
+
+
+def _norm(path):
+    """Read file bytes for CONTENT compare, ignoring CRLF vs LF. Binary (has NUL) kept raw."""
+    b = open(path, "rb").read()
+    return b if b"\x00" in b else b.replace(b"\r\n", b"\n")
+
+
+def same_content(a, b):
+    """True if two files are identical IGNORING line endings. The game rewrites instance .cfg as
+    CRLF while canonical is LF-pinned (.gitattributes) — a byte compare would flag every file."""
+    try:
+        return _norm(a) == _norm(b)
+    except FileNotFoundError:
+        return False
+
+
+def copy_lf(src, dst):
+    """REVERSE copy (instance -> canonical): normalize CRLF -> LF so we never re-pollute the
+    LF-pinned canonical (would resurrect the CRLF<->LF diff .gitattributes kills). Binary kept raw."""
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    b = open(src, "rb").read()
+    if b"\x00" not in b:
+        b = b.replace(b"\r\n", b"\n")
+    open(dst, "wb").write(b)
 
 
 def deny_kind(rel):
@@ -178,7 +203,7 @@ def forward(canonical, instances, only, apply, one_instance):
             idst = os.path.join(idir, rel)
             if not os.path.exists(idst):
                 differ, tag = True, "NEW    "
-            elif not filecmp.cmp(csrc, idst, shallow=False):
+            elif not same_content(csrc, idst):
                 differ, tag = True, "DIFFERS"
             else:
                 differ = False
@@ -235,10 +260,10 @@ def reverse(canonical, instances, name, only, apply, all_confirm):
                     n_apply += 1
             continue
 
-        # plain file: byte-compare, byte-copy (CRLF preserved) instance -> canonical
+        # plain file: compare IGNORING line endings, write LF-normalized instance -> canonical
         if not os.path.exists(cdst):
             differ, tag = True, "NEW->canon"
-        elif not filecmp.cmp(isrc, cdst, shallow=False):
+        elif not same_content(isrc, cdst):
             differ, tag = True, "DIFFERS   "
         else:
             differ = False
@@ -246,7 +271,7 @@ def reverse(canonical, instances, name, only, apply, all_confirm):
             n_diff += 1
             print(f"  {tag}: {rel}")
             if apply:
-                copy_byte(isrc, cdst)
+                copy_lf(isrc, cdst)
                 n_apply += 1
 
     print(f"  -> {n_diff} to update, {n_skip} skipped (machine-junk)"
