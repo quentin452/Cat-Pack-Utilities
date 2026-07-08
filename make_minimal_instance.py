@@ -166,8 +166,10 @@ def build_argfile(base_arg, dest_dir, autoworld):
     return dest_arg
 
 
-FATAL_SIGNATURES = ("requires mods [", "could not be found", "Missing Mods",
-                    "GuiFatalErrorScreen", "A fatal error has occurred")
+# Kept SPECIFIC: a bare "could not be found" false-matches benign warns (e.g. BoP's
+# "version.properties file could not be found"). Only real FML fatal-dependency phrasing.
+FATAL_SIGNATURES = ("requires mods [", "The mods and versions listed below could not be found",
+                    "Missing Mods:", "GuiFatalErrorScreen", "A fatal error has occurred while")
 
 
 def poll_boot(dest_dir, argname, timeout=420):
