@@ -214,13 +214,25 @@ def gh_release_exists(slug, version):
 
 
 def _version_matches_file(version, f):
-    """A CF/Modrinth file 'carries' this version if the version string appears in its fileName or
-    displayName. CF author uploads set displayName = the version we pass (e.g. 'V1.17.5', '1.0.4',
-    '1.9.1-fork9'); the raw fileName may differ (build artifact name), so we check BOTH — robust to
-    either convention."""
-    v = str(version).lower()
-    return (v in str(f.get("fileName", "")).lower()
-            or v in str(f.get("displayName", "")).lower())
+    """A CF file 'carries' this version if a BOUNDARY-AWARE match of the version appears in its
+    fileName or displayName (checked BOTH — displayName = the version we pass, e.g. 'V1.17.5',
+    '1.0.4', '1.9.1-fork9'; the raw fileName may differ).
+
+    Plain substring was asymmetric: it false-SKIPPED ('v1.1.1' in 'v1.1.10' -> thinks 1.1.1 exists)
+    and false-DUPED (our 'V1.17.5' vs a CF file displayed '1.17.5' -> miss -> duplicate upload). So we
+    reuse release_pack.pack_already_published's proven boundary pattern `re.escape(v)(?![0-9.])` (+ a
+    left `(?<![0-9.])` so a bare-number version can't match inside a longer number), and — like the
+    Modrinth path — compare BOTH the 'V1.17.5' and stripped '1.17.5' forms so a leading-V convention
+    drift on CF can't defeat the dup check."""
+    v = str(version)
+    stripped = v[1:] if v[:1] in ("V", "v") else v
+    cands = {v, stripped, "V" + stripped}          # both V-prefixed and bare forms
+    pats = [re.compile(r"(?<![0-9.])" + re.escape(c) + r"(?![0-9.])", re.I) for c in cands]
+    for field in ("fileName", "displayName"):
+        s = str(f.get(field, ""))
+        if any(p.search(s) for p in pats):
+            return True
+    return False
 
 
 def cf_file_exists(project_id, version, api_key):
@@ -256,35 +268,47 @@ def modrinth_version_exists(project, version):
     return any(str(v.get("version_number")) == str(version) for v in versions)
 
 
-def publish_plan(mod, version, slug, cf_api_key, force, force_cf):
+def publish_plan(mod, version, slug, cf_api_key, force_cf, force_modrinth):
     """Read-only per-target plan so dry-run and execute agree and neither duplicates. Returns
-    {target: (action, note)} with action in {'publish','skip'}. Targets: 'GitHub' always; 'CF' and
-    'Modrinth' only if configured. `version` is the RESOLVED version (auto-derived), not the raw
-    manifest literal."""
+    {target: (action, note)} with action in {'publish','clobber','skip'}. Targets: 'GitHub' always;
+    'CF' and 'Modrinth' only if configured. `version` is the RESOLVED version (auto-derived), not the
+    raw manifest literal.
+
+    FORCE is PER-TARGET (never a single blast-all --force): `force_cf` forces the CF leg (upload even
+    when it already has the version, or when it can't be verified), `force_modrinth` forces the
+    Modrinth leg. This keeps 'retry the ONE leg that failed' from accidentally duplicating the others.
+    """
     plan = {}
 
-    # GitHub — always a target. gh itself refuses a duplicate tag, so on exists we ALWAYS skip
-    # (even with --force; there is nothing safe to force here).
+    # GitHub — always a target. gh refuses a duplicate tag, so on a normal already-released mod we
+    # skip. EXCEPTION: bump=none is a deliberate RE-release over the SAME tag (url.bundle pins that
+    # tag's asset), so skipping GitHub would ship the OLD jar — instead CLOBBER the asset in place
+    # (gh release upload --clobber) so it actually updates.
+    bump_none = mod.get("bump") == "none"
     if gh_release_exists(slug, version):
-        plan["GitHub"] = ("skip", f"GitHub {version} already released")
+        if bump_none:
+            plan["GitHub"] = ("clobber", f"GitHub {version} exists — bump=none re-release, replacing "
+                                         f"the asset in place (gh release upload --clobber)")
+        else:
+            plan["GitHub"] = ("skip", f"GitHub {version} already released")
     else:
         plan["GitHub"] = ("publish", None)
 
     if mod.get("curseforge"):
         pid = mod["curseforge"]["project_id"]
-        if force:
-            plan["CF"] = ("publish", "forced (--force)")
-        else:
-            exists = cf_file_exists(pid, version, cf_api_key)
-            if exists is True:
-                plan["CF"] = ("skip", f"CF file for {version} already exists")
-            elif exists is False:
-                plan["CF"] = ("publish", None)
-            elif force_cf:
-                plan["CF"] = ("publish", "unverifiable but --force-cf")
-            else:  # cannot verify (no CF_API_KEY / API error) -> skip to avoid a duplicate
-                plan["CF"] = ("skip", "cannot verify CF (no CF_API_KEY) — skipping to avoid a "
-                                      "duplicate; pass --force-cf to upload anyway")
+        exists = cf_file_exists(pid, version, cf_api_key)
+        if exists is False:
+            plan["CF"] = ("publish", None)
+        elif force_cf:
+            # force_cf = upload the CF leg regardless: known DUPLICATE, or UNVERIFIABLE (no read key).
+            note = ("forced (--force-cf) — CF already has this version, uploading a DUPLICATE"
+                    if exists is True else "unverifiable but --force-cf")
+            plan["CF"] = ("publish", note)
+        elif exists is True:
+            plan["CF"] = ("skip", f"CF file for {version} already exists")
+        else:  # cannot verify (no CF_API_KEY / API error) -> skip to avoid a duplicate
+            plan["CF"] = ("skip", "cannot verify CF (no CF_API_KEY) — skipping to avoid a "
+                                  "duplicate; pass --force-cf to upload anyway")
 
     if mod.get("modrinth"):
         proj = mod["modrinth"]["project"]
@@ -292,16 +316,15 @@ def publish_plan(mod, version, slug, cf_api_key, force, force_cf):
         # probe AND the upload compare the same string (default strip-v; per-mod override).
         mr_fmt = mod["modrinth"].get("version_format", "strip-v")
         mr_ver = normalize_modrinth_version(version, mr_fmt)
-        if force:
-            plan["Modrinth"] = ("publish", f"forced (--force); as {mr_ver}")
-        else:
-            exists = modrinth_version_exists(proj, mr_ver)
-            if exists is True:
-                plan["Modrinth"] = ("skip", f"Modrinth {mr_ver} already exists")
-            elif exists is False:
-                plan["Modrinth"] = ("publish", f"as {mr_ver}")
-            else:  # public API; None = transient error -> attempt (Modrinth rejects true dupes itself)
-                plan["Modrinth"] = ("publish", f"as {mr_ver}; could not verify Modrinth — will attempt")
+        exists = modrinth_version_exists(proj, mr_ver)
+        if exists is True and not force_modrinth:
+            plan["Modrinth"] = ("skip", f"Modrinth {mr_ver} already exists")
+        elif exists is True:  # force_modrinth
+            plan["Modrinth"] = ("publish", f"forced (--force-modrinth) DUPLICATE; as {mr_ver}")
+        elif exists is False:
+            plan["Modrinth"] = ("publish", f"as {mr_ver}")
+        else:  # public API; None = transient error -> attempt (Modrinth rejects true dupes itself)
+            plan["Modrinth"] = ("publish", f"as {mr_ver}; could not verify Modrinth — will attempt")
     return plan
 
 
@@ -493,6 +516,9 @@ def scan_boot_log(boot_log, mod, bt, log):
         if mixin_fatal or (token and token in re.sub(r"[^a-z0-9]", "", low)):
             log("boot-verify: FATAL is a mixin-apply failure / attributed to THIS mod — GATE FAIL")
             return False
+        # ACCEPTED RISK (audit #3, by design): a fatal NOT attributed to this mod is a WARN, not a
+        # block — a minimal-instance dep gap must not fail a good mod. Trade-off: a crash this mod
+        # truly caused but that attribution misses would slip through as a WARN. Kept intentionally.
         log("boot-verify: WARN boot has a FATAL but it is NOT attributed to this mod (likely a "
             "minimal-instance dependency gap) — not blocking; inspect %s" % boot_log)
         return True
@@ -570,8 +596,8 @@ def boot_verify(mod, jar, execute, skip_boot, log):
     return ok
 
 
-def release_one(mod, execute, skip_build, changelog_override=None, force=False, force_cf=False,
-                cf_api_key=None, skip_boot=False):
+def release_one(mod, execute, skip_build, changelog_override=None, force_cf=False,
+                force_modrinth=False, cf_api_key=None, skip_boot=False):
     name = mod["name"]
     repo = os.path.expanduser(mod["repo"])
     log = lambda m: print(f"  [{name}] {m}")
@@ -622,11 +648,17 @@ def release_one(mod, execute, skip_build, changelog_override=None, force=False, 
         prev_tag = git(repo, "describe", "--tags", "--abbrev=0", f"{version}^", check=False)
     else:
         prev_tag = git(repo, "describe", "--tags", "--abbrev=0", check=False)
+    # tag_created = this run created a NEW local tag (execute + not pre-existing). ANY later failure
+    # (build, boot-verify, or a publish leg) must roll it back — else the tag stays at HEAD, next run's
+    # resolve_version sees 0 commits since it and SILENTLY skips the mod (never shipped), and the
+    # partial-publish retry never runs. A pre-existing tag (re-run / bump=none) is NEVER deleted.
+    tag_created = False
     if existing:
         log(f"tag {version} already exists (re-using)")
     else:
         if execute:
             git(repo, "tag", version)
+            tag_created = True
             log(f"tagged {version}")
         else:
             log(f"[dry-run] would tag {version}")
@@ -645,7 +677,7 @@ def release_one(mod, execute, skip_build, changelog_override=None, force=False, 
             log("BUILD FAILED -> rolling back tag, skipping release")
             for ln in out.splitlines()[-8:]:
                 print(f"      {ln}")
-            if execute and not existing:
+            if tag_created:
                 git(repo, "tag", "-d", version, check=False)
             return False
         log("build OK")
@@ -665,6 +697,9 @@ def release_one(mod, execute, skip_build, changelog_override=None, force=False, 
     # apply-time. On failure the release for THIS mod is skipped (tag/build stay; publish does not).
     if not boot_verify(mod, jar, execute, skip_boot, log):
         log("BOOT-VERIFY FAILED -> not publishing this mod")
+        if tag_created:  # FIX 1: don't let a boot-verify fail leave a tag that masks the mod as shipped
+            git(repo, "tag", "-d", version, check=False)
+            log(f"rolled back tag {version} (boot-verify failed — re-run re-derives + retries)")
         return False
 
     # Changelog = commits since previous tag. Format as a markdown bullet list: raw subject lines
@@ -685,12 +720,14 @@ def release_one(mod, execute, skip_build, changelog_override=None, force=False, 
     # Idempotency: probe every target read-only so a re-run skips what is already published
     # (no duplicate GitHub release / CF file / Modrinth version) instead of erroring or duplicating.
     slug = origin_slug(repo)
-    plan = publish_plan(mod, version, slug, cf_api_key, force, force_cf)
+    plan = publish_plan(mod, version, slug, cf_api_key, force_cf, force_modrinth)
 
     if not execute:
         for tgt, (action, note) in plan.items():
             if action == "publish":
                 log(f"[dry-run] would publish {tgt}" + (f" ({note})" if note else ""))
+            elif action == "clobber":
+                log(f"[dry-run] would re-upload {tgt} asset" + (f" ({note})" if note else ""))
             else:
                 log(f"[dry-run] {tgt}: already released — would skip" + (f" ({note})" if note else ""))
         return True
@@ -712,6 +749,12 @@ def release_one(mod, execute, skip_build, changelog_override=None, force=False, 
                 gh_cmd += ["-R", slug]  # target the fork, not gh's default (the upstream parent)
             run(gh_cmd, cwd=repo)
             log(f"GitHub release {version} created ({slug or 'default repo'})")
+        elif gh_action == "clobber":  # FIX 2: bump=none re-release — replace the asset on the same tag
+            gh_cmd = ["gh", "release", "upload", version, jar, "--clobber"]
+            if slug:
+                gh_cmd += ["-R", slug]
+            run(gh_cmd, cwd=repo)
+            log(f"GitHub release {version} asset re-uploaded (--clobber, bump=none re-release)")
         else:
             log(f"GitHub: {gh_note} — skip")
 
@@ -723,8 +766,8 @@ def release_one(mod, execute, skip_build, changelog_override=None, force=False, 
                           "--project-id", str(cf["project_id"]), "--file", jar,
                           "--display-name", version, "--game-version", cf.get("game_version", "1.7.10"),
                           "--release-type", "release", "--changelog-file", notes]
-                if force:
-                    cf_cmd.append("--force")  # let cf_upload's own duplicate guard through too
+                if force_cf:
+                    cf_cmd.append("--force")  # per-target: let cf_upload's own duplicate guard through
                 run(cf_cmd, capture=False)
                 log("CurseForge upload done")
             else:
@@ -746,6 +789,15 @@ def release_one(mod, execute, skip_build, changelog_override=None, force=False, 
                 log("Modrinth upload done")
             else:
                 log(f"Modrinth: {mr_note} — skip")
+    except Exception:
+        # FIX 1: a publish leg threw (CF/Modrinth/GitHub). Roll back a NEWLY-created tag so the next
+        # run re-derives the SAME version and RETRIES — publish_plan's idempotency probes then skip
+        # the legs that already went through and only re-attempt the one that failed. A pre-existing
+        # tag (re-run / bump=none) is left intact.
+        if tag_created:
+            git(repo, "tag", "-d", version, check=False)
+            log(f"rolled back tag {version} (a publish leg failed — re-run retries the missing leg)")
+        raise
     finally:
         os.unlink(notes)
     return True
@@ -761,12 +813,15 @@ def main():
                     help="bypass the boot-verify gate (mixin apply-time check). Default: gate ON "
                          "for any mod with a boot_test manifest block")
     ap.add_argument("--changelog-file", help="curated release notes (markdown); only with --only")
-    ap.add_argument("--force", action="store_true",
-                    help="publish to EVERY configured target even if it already has this version "
-                         "(danger: re-uploads a duplicate CF/Modrinth file). GitHub is never forced.")
+    # Force is PER-TARGET (no bare --force blast-all) so 'retry the ONE leg that failed' can't
+    # accidentally duplicate the others. GitHub is never forced (gh refuses a duplicate tag; a
+    # bump=none re-release clobbers its asset automatically).
     ap.add_argument("--force-cf", action="store_true",
-                    help="upload to CurseForge even when it can't be verified (no CF_API_KEY read "
-                         "key); default without a key is to SKIP the CF upload for safety")
+                    help="upload to CurseForge even if it already has this version (DUPLICATE) OR "
+                         "can't be verified (no CF_API_KEY read key); default is to SKIP for safety")
+    ap.add_argument("--force-modrinth", action="store_true",
+                    help="upload to Modrinth even if it already has this version (duplicate attempt; "
+                         "Modrinth rejects true dupes itself); default is to SKIP an existing version")
     args = ap.parse_args()
 
     mods = json.load(open(args.manifest))["mods"]
@@ -813,8 +868,8 @@ def main():
     for m in ready:
         try:
             if release_one(m, args.execute, args.skip_build, changelog_override=override,
-                           force=args.force, force_cf=args.force_cf, cf_api_key=cf_api_key,
-                           skip_boot=args.skip_boot):
+                           force_cf=args.force_cf, force_modrinth=args.force_modrinth,
+                           cf_api_key=cf_api_key, skip_boot=args.skip_boot):
                 done += 1
         except Exception as e:
             print(f"  [{m['name']}] ERROR: {e}")
