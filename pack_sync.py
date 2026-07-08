@@ -37,6 +37,10 @@ SERVER_MODS = f"{PACK}/src/server/mods"
 CF_API = "https://api.curseforge.com"
 
 APPLY = "--apply" in sys.argv
+# --check: strict mode — exit non-zero when there are PENDING (would-change but unapplied) fileID
+# edits. GATE 2 of release_pack uses this so a manifest fileID bumped-but-not-`--apply`'d can't sail
+# through green and package zips with the OLD (stale) fileIDs.
+CHECK = "--check" in sys.argv
 problems = []
 changes = []
 
@@ -311,6 +315,10 @@ def main():
     log(f"=== OK — {len(changes)} change(s) {'applied' if APPLY else 'pending (run --apply)'} ===")
     if not APPLY and changes:
         log("    then run bundle_check + build zips + upload (see release skill).")
+        if CHECK:
+            log(f"⛔ --check: {len(changes)} PENDING fileID edit(s) NOT applied — run "
+                f"pack_sync --apply first (zips would ship the OLD fileIDs).")
+            sys.exit(2)
 
 
 if __name__ == "__main__":

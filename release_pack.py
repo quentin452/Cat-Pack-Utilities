@@ -324,6 +324,8 @@ def _shipped_local_build_mods():
     mods = json.load(open(RELEASE_MANIFEST))["mods"]
     out = []
     for m in mods:
+        # ACCEPTED RISK (audit #7, by design): a shipped mod with no `jar_glob` (pack-delivery-only,
+        # not built from HEAD here) is not smoke-tested by this gate — it has no local build to boot.
         if not m.get("jar_glob") or not m.get("pack"):
             continue
         pk = m["pack"]
@@ -342,7 +344,9 @@ def _newest_built_jar(m):
 
 def _newest_source_mtime(repo):
     """(mtime, path) of the newest SOURCE file in the repo (build outputs / VCS / caches excluded).
-    Heuristic freshness signal: if the built jar predates this, the jar is a stale build."""
+    Heuristic freshness signal: if the built jar predates this, the jar is a stale build.
+    ACCEPTED RISK (audit #7, by design): mtime is a heuristic — a `touch` or a checkout that rewrites
+    timestamps without a content change can false-trip; --smoke-build sidesteps it by rebuilding."""
     repo = os.path.expanduser(repo)
     newest, newest_f = 0.0, None
     for dp, dns, fns in os.walk(repo):
@@ -526,8 +530,10 @@ def main():
         sys.exit(f"⛔ GATE 1: pack repo working tree not clean:\n{dirty}\n— commit/stash first.")
     print("=== GATE 1: pack repo tree clean ✓")
 
-    # GATE 2 — pack config consistency + Approved-only fileIDs
-    run([sys.executable, HERE / "pack_sync.py"], "GATE 2 (pack_sync consistency)")
+    # GATE 2 — pack config consistency + Approved-only fileIDs. --check makes pack_sync exit non-zero
+    # on PENDING (would-change but unapplied) fileID edits, so a manifest fileID bumped-but-not-applied
+    # FAILS the gate instead of packaging zips with the stale OLD fileIDs.
+    run([sys.executable, HERE / "pack_sync.py", "--check"], "GATE 2 (pack_sync consistency)")
 
     # GATE 3 — personal fork bundles not stale vs their GitHub releases
     if args.skip_audit:
