@@ -18,6 +18,7 @@ import json
 import os
 import re
 import sys
+import urllib.error
 import urllib.request
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -123,6 +124,18 @@ def main():
     if mr_version != args.version:
         print(f"[modrinth] version {args.version} -> {mr_version} (version-format={args.version_format})")
 
+    # project_id in the POST /version payload MUST be the Base62 project ID, NOT the slug — passing a
+    # slug fails with {"error":"invalid_input","description":"Base62 decoding overflowed"} (2026-07-09).
+    # Resolve slug -> id via the public project endpoint (works whether --project is a slug or an id).
+    try:
+        project_id = api_get(f"/project/{args.project}").get("id")
+    except Exception as ex:
+        sys.exit(f"[modrinth] cannot resolve project '{args.project}' to its id: {ex}")
+    if not project_id:
+        sys.exit(f"[modrinth] project '{args.project}' has no id in the API response")
+    if project_id != args.project:
+        print(f"[modrinth] project {args.project} -> id {project_id}")
+
     data = {
         "name": args.name or mr_version,
         "version_number": mr_version,
@@ -132,7 +145,7 @@ def main():
         "version_type": args.release_type,
         "loaders": [args.loader],
         "featured": False,
-        "project_id": args.project,
+        "project_id": project_id,
         "file_parts": ["file"],
         "primary_file": "file",
     }
@@ -151,8 +164,17 @@ def main():
     req = urllib.request.Request(f"{API}/version", data=body, method="POST")
     req.add_header("Authorization", token)
     req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
-    with urllib.request.urlopen(req, timeout=120) as r:
-        resp = json.load(r)
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            resp = json.load(r)
+    except urllib.error.HTTPError as e:
+        # Modrinth returns a JSON {"error","description"} body explaining the rejection — surface it
+        # (a bare "HTTP Error 400" is undebuggable). Echo the payload keys we sent for context.
+        detail = e.read().decode("utf-8", "replace")
+        sys.exit(f"[modrinth] HTTP {e.code} on POST /version — {detail}\n"
+                 f"  sent: version_number={data['version_number']} loaders={data['loaders']} "
+                 f"game_versions={data['game_versions']} project_id={data['project_id']} "
+                 f"version_type={data['version_type']}")
     print(f"[modrinth] OK — version id: {resp.get('id')}")
 
 
