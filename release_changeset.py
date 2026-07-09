@@ -190,6 +190,25 @@ def repo_ahead(repo, tag):
     return len(subjects), counts, subjects
 
 
+def ahead_touches_shippable(repo, tag):
+    """(shippable, changed_files_summary) — does tag..HEAD change anything that lands in the JAR?
+    Triangulation on ACTUAL changed files, not the commit message (which is often non-conventional →
+    misclassified 'other'). Shippable = a path under src/main/ (compiled code + bundled resources).
+    build.gradle / settings.gradle / gradle/ / gradlew / README / *.md / docs/ / .github/ / src/test/
+    are NOT shipped, so a repo whose only ahead-commits touch those is NOTHING to ship (vécu 2026-07-09:
+    ArchaicFix 'Update buildscript' = build.gradle*, Cat-Culling 'Update README.md' = README.md)."""
+    p = repo["_abspath"]
+    files = [f for f in (git(p, "diff", "--name-only", f"{tag}..HEAD") or "").splitlines() if f.strip()]
+    shippable = any(f.startswith("src/main/") or "/src/main/" in f for f in files)
+    if not files:
+        summary = "no files"
+    elif shippable:
+        summary = "src/main change"
+    else:
+        summary = "non-code: " + ", ".join(sorted({f.split("/")[-1] for f in files})[:4])
+    return shippable, summary
+
+
 # --- instance-drift side (reuse bundle_drift.classify) -----------------------
 def instance_drift(canonical_config, mods_dir, cf_key):
     declared = bundle_drift.collect_declared(canonical_config, cf_key)
@@ -257,9 +276,15 @@ def main():
             else:
                 cnt, counts, _subj = repo_ahead(repo, tag)
                 if cnt > 0:
-                    repo_state = "ahead"
+                    shippable, chg = ahead_touches_shippable(repo, tag)
                     head_txt = f"{repo['name']} +{cnt} past {tag}"
-                    note = f"{how} [{fmt_counts(counts)}]"
+                    if shippable:
+                        repo_state = "ahead"
+                        note = f"{how} [{fmt_counts(counts)}]"
+                    else:
+                        # repo moved but nothing lands in the jar (build/docs/test only) — not to ship
+                        repo_state = "ahead_nocode"
+                        note = f"{how} [{fmt_counts(counts)}] — {chg}, nothing to ship"
                 else:
                     repo_state = "clean"
                     head_txt = f"{repo['name']} == {tag}"
@@ -276,6 +301,8 @@ def main():
             signal = "INSTANCE_DRIFT"
         elif repo_flag:
             signal = "REPO_AHEAD"
+        elif repo_state == "ahead_nocode":
+            signal = "AHEAD_NOCODE"   # repo moved but only build/docs/test — shown, NOT in the ship set
         elif repo_state == "tagmiss":
             signal = "TAG?"
         else:
@@ -290,7 +317,10 @@ def main():
                      "instance": j, "repo_head": "-", "signal": "INSTANCE_DRIFT",
                      "note": "undeclared addition (in mods/, no bundle declares it)"})
 
-    non_clean = [r for r in rows if r["signal"] != "clean"]
+    # to_ship = the real change-set (exit code + flagged count). AHEAD_NOCODE (repo moved but only
+    # build/docs/test — nothing lands in the jar) is shown for transparency but NOT to ship.
+    non_clean = [r for r in rows if r["signal"] not in ("clean", "AHEAD_NOCODE")]
+    nocode = [r for r in rows if r["signal"] == "AHEAD_NOCODE"]
 
     if args.json:
         import json
@@ -301,15 +331,17 @@ def main():
                         "instance_drift": sum(r["signal"] in ("INSTANCE_DRIFT", "BOTH") for r in rows),
                         "repo_ahead": sum(r["signal"] in ("REPO_AHEAD", "BOTH") for r in rows),
                         "both": sum(r["signal"] == "BOTH" for r in rows),
+                        "ahead_nocode": len(nocode),
                         "tag_unresolved": sum(r["signal"] == "TAG?" for r in rows)},
             "limitation": "does NOT catch upstream-version bumps where the fork is BEHIND upstream "
                           "(e.g. lwjgl3ify 2.1.15->3.0.26); that is mod_update_checker.py / manual.",
         }, indent=2))
         sys.exit(1 if non_clean else 0)
 
-    shown = non_clean if args.only_flagged else rows
+    shown = (non_clean + nocode) if args.only_flagged else rows
     shown = sorted(shown, key=lambda r: ({"BOTH": 0, "REPO_AHEAD": 1, "INSTANCE_DRIFT": 2, "TAG?": 3,
-                                          "clean": 9}.get(r["signal"], 4), r["mod"].lower()))
+                                          "AHEAD_NOCODE": 8, "clean": 9}.get(r["signal"], 4),
+                                         r["mod"].lower()))
 
     print("=" * 108)
     print("RELEASE CHANGESET — union of instance-drift (bundle_drift) + repo-ahead (repos.json), "
@@ -336,6 +368,9 @@ def main():
     print(f"SUMMARY: {len(rows)} bundle mod(s) checked | {len(non_clean)} flagged "
           f"(INSTANCE_DRIFT {s['instance']}, REPO_AHEAD {s['repo']}, BOTH {s['both']}, "
           f"TAG-unresolved {s['tag']}).")
+    if nocode:
+        print(f"  + {len(nocode)} repo-ahead IGNORED (build/docs/test only, nothing ships): "
+              f"{', '.join(r['mod'] for r in nocode)}")
     print("LIMITATION: catches instance-drift + owned-fork-ahead-of-shipped-tag ONLY. It does NOT")
     print("  catch an upstream-version bump where the fork is BEHIND upstream (e.g. lwjgl3ify")
     print("  2.1.15->3.0.26) — that axis is mod_update_checker.py / a manual decision. A clean run")
