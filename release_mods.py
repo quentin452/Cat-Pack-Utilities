@@ -983,6 +983,20 @@ def main():
         mods = [m for m in mods if m["name"] == args.only]
         if not mods:
             sys.exit(f"no releasable mod named {args.only!r} in manifest (pack-only entries are skipped)")
+        # --only names a mod explicitly -> honor even a no_release blacklist (force path if CF ever
+        # approves a newer file), but warn loudly so it's a deliberate override.
+        for m in mods:
+            if m.get("no_release"):
+                print(f"⚠ {m['name']}: no_release set ({m['no_release']}) but named via --only — "
+                      f"proceeding as an explicit override.")
+    else:
+        # Blacklist: mods prohibited from auto-release (e.g. FileDirector — CF rejects new forks per
+        # BUG-023; the pack pins the grandfathered Approved file). Still tracked in the manifest for
+        # pack_sync delivery, but never swept into a bulk release. Force one with --only if needed.
+        blacklisted = [m for m in mods if m.get("no_release")]
+        for m in blacklisted:
+            print(f"  [BLACKLIST] {m['name']}: no_release — {m['no_release']} (skipped; --only to force)")
+        mods = [m for m in mods if not m.get("no_release")]
     override = None
     if args.changelog_file:
         if not args.only:
