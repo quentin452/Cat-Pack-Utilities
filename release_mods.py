@@ -711,6 +711,17 @@ def verify_one(mod, skip_build, skip_boot):
     return ok
 
 
+def _sanitize_at_mentions(text):
+    """Backtick-wrap bare @Word tokens (mixin annotations: @Overwrite/@Inject/@Redirect/…) so a GitHub
+    release body doesn't turn them into user @-mentions (bogus 'Contributors'). Leaves tokens already
+    inside backticks alone (curated changelog safe). Harmless on CF/Modrinth (renders as inline code)."""
+    # split on backtick spans; only rewrite the OUTSIDE (even-index) segments
+    parts = text.split("`")
+    for i in range(0, len(parts), 2):
+        parts[i] = re.sub(r"@(\w+)", r"`@\1`", parts[i])
+    return "`".join(parts)
+
+
 def release_one(mod, execute, skip_build, changelog_override=None, force_cf=False,
                 force_modrinth=False, cf_api_key=None, skip_boot=False):
     name = mod["name"]
@@ -857,6 +868,12 @@ def release_one(mod, execute, skip_build, changelog_override=None, force_cf=Fals
     if changelog_override:
         changelog = changelog_override
         log(f"changelog OVERRIDDEN (--changelog-file): {len(changelog.splitlines())} line(s) — curated wording replaces the raw commit subjects")
+    # Sanitize @-tokens (mixin annotations @Overwrite/@Inject/@Redirect/@SubscribeEvent, etc.): on a
+    # GitHub release body, a bare @Word is parsed as a user MENTION -> the release grows bogus
+    # "Contributors: @overwrite @inject @redirect" (vécu 2026-07-09, OaT V1.17.6). Wrap @Word in
+    # backticks (renders as code, kills the mention; harmless on CF/Modrinth which don't @-mention).
+    # Skip tokens already inside backticks so a curated changelog isn't double-wrapped.
+    changelog = _sanitize_at_mentions(changelog)
 
     # Idempotency: probe every target read-only so a re-run skips what is already published
     # (no duplicate GitHub release / CF file / Modrinth version) instead of erroring or duplicating.
@@ -889,7 +906,15 @@ def release_one(mod, execute, skip_build, changelog_override=None, force_cf=Fals
         gh_action, gh_note = plan["GitHub"]
         if gh_action == "publish":
             git(repo, "push", "origin", version)  # push the tag
-            gh_cmd = ["gh", "release", "create", version, "-t", mod["gh_title"], "-F", notes, jar]
+            # gh_title in the manifest hardcodes a version (e.g. "1.7.10 V1.17.5 — …"); substitute the
+            # ACTUAL release version so the GitHub title isn't stale (vécu 2026-07-09: title shipped as
+            # V1.17.5 for a V1.17.6 release, hand-fixed). No-op if gh_title doesn't carry the old version.
+            gh_title = mod["gh_title"]
+            old_ver = mod.get("version")
+            if old_ver and old_ver in gh_title and old_ver != version:
+                gh_title = gh_title.replace(old_ver, version)
+                log(f"gh_title: {old_ver} -> {version} (substituted actual release version)")
+            gh_cmd = ["gh", "release", "create", version, "-t", gh_title, "-F", notes, jar]
             if slug:
                 gh_cmd += ["-R", slug]  # target the fork, not gh's default (the upstream parent)
             run(gh_cmd, cwd=repo)
