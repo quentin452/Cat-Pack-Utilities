@@ -36,7 +36,16 @@ HOME = Path.home()
 SERVER_SRC = Path(E.INSTANCE_SERVER)
 SMOKE_CLONE = HOME / "Bureau/SERVERS/_smoke_clone"
 CLIENT_INSTANCE = Path(E.INSTANCE_TEST)
+# Live instance argfile — regenerated on every lwjgl3ify bump (has the CURRENT 3.0.26 classpath +
+# RFB + forgePatches). Preferred base for the smoke client so a lwjgl3ify bump can't leave it stale.
+# Its autoworld flag (auto-loads a SINGLEPLAYER world) is stripped so the client JOINS the server.
+LIVE_CLIENT_ARGFILE = Path(E.INSTANCE_TEST) / "pack-worldgen.arg"
+# Frozen fallback (recapture from /tmp/lwjgl3ify-relaunch-*.arg after a CF launch). STALE-PRONE:
+# a lwjgl3ify bump periments it (2026-07-09: 6-juil capture -> old RFB -> BytePatternMatcher crash).
 CLIENT_ARGFILE = Path(E.HUB) / "docs/captures/client-relaunch.arg"
+# matoulib devtool flags to DROP from the smoke client: autoworld would load a singleplayer world
+# instead of joining; rpc would bind 127.0.0.1:25580 (unneeded for a join smoke).
+CLIENT_STRIP_FLAG_SUBSTRINGS = ("matoulib.autoworld", "matoulib.rpc")
 OAT_REPO = HOME / "Documents/GitHub/OptimizationsAndTweaks"
 
 JAVA = Path("/usr/lib/jvm/default-runtime/bin/java")  # java 21, what the pack runs on
@@ -161,14 +170,29 @@ def _avail_ram_gb():
 
 
 def _build_client_argfile(host, port):
-    """Copy the captured stage-2 client argfile: repoint --gameDir at the TEST instance and append
-    auto-connect args. Returns the temp argfile path."""
-    if not CLIENT_ARGFILE.exists():
-        die(f"client argfile not captured: {CLIENT_ARGFILE} (recapture it — see docs/captures)")
-    lines = CLIENT_ARGFILE.read_text(encoding="utf-8", errors="replace").splitlines()
-    out, i = [], 0
+    """Derive the smoke client argfile from the LIVE instance argfile (pack-worldgen.arg) so it always
+    carries the CURRENT lwjgl3ify/RFB classpath — a bump can't leave it stale (unlike the frozen
+    docs/captures capture, which 2026-07-09 mixed old RFB with lwjgl3ify 3.0.26 -> BytePatternMatcher
+    NoClassDefFound). Strips the matoulib autoworld/rpc flags (so the client JOINS instead of loading a
+    singleplayer world), repoints --gameDir at the TEST instance, shrinks the heap, and appends the
+    server auto-connect args. Falls back to the frozen capture only if the live argfile is absent."""
+    if LIVE_CLIENT_ARGFILE.exists():
+        base = LIVE_CLIENT_ARGFILE
+        log(f"client argfile: LIVE instance argfile {base.name} (auto-tracks lwjgl3ify)")
+    elif CLIENT_ARGFILE.exists():
+        base = CLIENT_ARGFILE
+        log(f"⚠ client argfile: LIVE {LIVE_CLIENT_ARGFILE.name} absent — falling back to the FROZEN "
+            f"capture {base} (stale-prone; recapture if the client crashes at classload)")
+    else:
+        die(f"no client argfile: neither {LIVE_CLIENT_ARGFILE} nor {CLIENT_ARGFILE} exists")
+    lines = base.read_text(encoding="utf-8", errors="replace").splitlines()
+    out, i, stripped = [], 0, []
     while i < len(lines):
         raw = lines[i].strip().strip('"')
+        if any(s in raw for s in CLIENT_STRIP_FLAG_SUBSTRINGS):
+            stripped.append(raw)   # drop autoworld/rpc so the client joins the server, not singleplayer
+            i += 1
+            continue
         if raw.startswith("-Xmx"):
             out.append(f'"-Xmx{SMOKE_CLIENT_XMX}"')   # shrink client heap so it fits beside the server
             i += 1
@@ -179,6 +203,8 @@ def _build_client_argfile(host, port):
             i += 2
             continue
         i += 1
+    if stripped:
+        log(f"client argfile: stripped {len(stripped)} devtool flag(s): {', '.join(stripped)}")
     out += ['"--server"', f'"{host}"', '"--port"', f'"{port}"']
     tmp = SMOKE_CLONE / "smoke-client.arg"
     tmp.write_text("\n".join(out) + "\n", encoding="utf-8")
