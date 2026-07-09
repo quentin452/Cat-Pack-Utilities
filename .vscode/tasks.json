@@ -101,6 +101,20 @@
       "problemMatcher": []
     },
     {
+      "label": "Release: generate placeholder brand logos",
+      "type": "shell",
+      "command": "python3 gen_placeholder_logos.py",
+      "detail": "docs/26 clean-room: (re)generate the 512x512 placeholder PNG logos (gigafauna / matoulib / gigafauna-pack) into assets/brand/. Deterministic. Temporary art to satisfy CurseForge's mandatory avatar + Modrinth's icon; drop a real file with the same name to replace.",
+      "problemMatcher": []
+    },
+    {
+      "label": "Release: refresh Modrinth icons (--icons) — OUTWARD",
+      "type": "shell",
+      "command": "python3 reserve_slugs.py --icons",
+      "detail": "OUTWARD: upload/replace the Modrinth icon of the EXISTING gigafauna/matoulib/gigafauna-pack projects from assets/brand/<slug>.png (PATCH /project/{id}/icon). Use after regenerating logos or dropping real art. No project is created.",
+      "problemMatcher": []
+    },
+    {
       "label": "Release: wire reserved ids into release-manifest",
       "type": "shell",
       "command": "python3 reserve_slugs.py --wire-manifest --cf-id gigafauna=${input:cfIdGigafauna} --cf-id matoulib=${input:cfIdMatoulib} --cf-id pack=${input:cfIdPack}",

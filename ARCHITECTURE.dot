@@ -17,6 +17,7 @@ digraph arch {
   S_changelog_from_git [label="changelog_from_git.py", fillcolor="#1f6feb", fontcolor="white"];
   S_config_sync [label="config_sync.py", fillcolor="#1f6feb", fontcolor="white"];
   S_dist_parity [label="dist_parity.py", fillcolor="#1f6feb", fontcolor="white"];
+  S_gen_placeholder_logos [label="gen_placeholder_logos.py", fillcolor="#1f6feb", fontcolor="white"];
   S_housekeep [label="housekeep.py", fillcolor="#1f6feb", fontcolor="white"];
   S_make_minimal_instance [label="make_minimal_instance.py", fillcolor="#1f6feb", fontcolor="white"];
   S_mixin_collision [label="mixin_collision.py", fillcolor="#1f6feb", fontcolor="white"];
