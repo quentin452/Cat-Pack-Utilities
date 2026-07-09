@@ -18,6 +18,7 @@ Usage:
   python3 pack_sync.py            # DRY-RUN: show every change + run verification
   python3 pack_sync.py --apply    # write the changes
 """
+import filecmp
 import json
 import os
 import re
@@ -294,13 +295,20 @@ def main():
             else:
                 old = [f for f in os.listdir(SERVER_MODS)
                        if re.match(r"!?mod-director-launchwrapper", f) and f != pk["server_jar_name"]]
-                log(f"    server jar: copy {os.path.basename(src)} -> {pk['server_jar_name']}; drop {old}")
-                changes.append(("<server-jar>", src, dst))
-                if APPLY:
-                    for f in old:
-                        os.remove(os.path.join(SERVER_MODS, f))
-                    if not (os.path.exists(dst) and os.path.samefile(src, dst)):
-                        shutil.copy2(src, dst)
+                # Only a REAL change: a stale jar to drop, or dst missing/differing from src. Without
+                # this, --check reported a phantom PENDING every run (dst already == src) and GATE 2
+                # of release_pack refused to ship (2026-07-09). filecmp catches src==dst and equal copies.
+                dst_ok = os.path.exists(dst) and filecmp.cmp(src, dst, shallow=False)
+                if old or not dst_ok:
+                    log(f"    server jar: copy {os.path.basename(src)} -> {pk['server_jar_name']}; drop {old}")
+                    changes.append(("<server-jar>", src, dst))
+                    if APPLY:
+                        for f in old:
+                            os.remove(os.path.join(SERVER_MODS, f))
+                        if not dst_ok:
+                            shutil.copy2(src, dst)
+                else:
+                    log(f"    = server jar: already up to date ({pk['server_jar_name']})")
                 # FileDirector consistency: client fileID's fork must match the server jar fork
                 fork = pk.get("fork")
                 cf_fork = re.search(r"fork\d+", new_disp or new_fn or "")
