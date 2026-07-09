@@ -568,6 +568,11 @@ def _run_gates(args, rl):
     run([sys.executable, HERE / "arch_map.py", "--check"], "GATE 9 (arch map up to date)")
     rl.gate("GATE 9 arch-map-current", True)
 
+    # GATE 10 — no bundle REGRESSION: a mod must not ship OLDER than any published cut. Catches a
+    # reverse-sync / bad edit that silently downgraded a fileID/version (vécu a2ee2f28) before it ships.
+    run([sys.executable, HERE / "bundle_regression_gate.py"], "GATE 10 (no bundle regression)")
+    rl.gate("GATE 10 no-bundle-regression", True)
+
 
 def main():
     ap = argparse.ArgumentParser(description="Gated modpack release pipeline.")

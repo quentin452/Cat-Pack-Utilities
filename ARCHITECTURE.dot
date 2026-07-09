@@ -9,6 +9,7 @@ digraph arch {
   S_boot_profiler [label="boot_profiler.py", fillcolor="#1f6feb", fontcolor="white"];
   S_bundle_check [label="bundle_check.py", fillcolor="#1f6feb", fontcolor="white"];
   S_bundle_drift [label="bundle_drift.py", fillcolor="#1f6feb", fontcolor="white"];
+  S_bundle_regression_gate [label="bundle_regression_gate.py", fillcolor="#1f6feb", fontcolor="white"];
   S_cascade_report [label="cascade_report.py", fillcolor="#1f6feb", fontcolor="white"];
   S_cf_upload [label="cf_upload.py", fillcolor="#1f6feb", fontcolor="white"];
   S_changelog_from_bundles [label="changelog_from_bundles.py", fillcolor="#1f6feb", fontcolor="white"];
@@ -52,6 +53,7 @@ digraph arch {
   D_ART_REPOS_JSON [label="repos.json", shape=cylinder, fillcolor="#f2cc60"];
   D_ART_URL_BUNDLE [label="url.bundle.json", shape=cylinder, fillcolor="#f2cc60"];
 
+  S_bundle_regression_gate -> S_changelog_from_bundles;
   S_dist_parity -> S_release_mods;
   S_pipeline_status -> S_pack_sync;
   S_release_changeset -> S_bundle_drift;

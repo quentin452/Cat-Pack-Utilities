@@ -7,7 +7,7 @@
     {
       "id": "packVersion",
       "type": "promptString",
-      "description": "Modpack version — dotted number, NO 'V' prefix (e.g. 1.1.8)",
+      "description": "Modpack version \u2014 dotted number, NO 'V' prefix (e.g. 1.1.8)",
       "default": "1.1.8"
     },
     {
@@ -48,7 +48,7 @@
       "problemMatcher": []
     },
     {
-      "label": "Pack: bundle check (fetchability) — PREFLIGHT",
+      "label": "Pack: bundle check (fetchability) \u2014 PREFLIGHT",
       "type": "shell",
       "command": "python3 bundle_check.py",
       "detail": "Every bundle mod downloadable? (CF Approved+downloadUrl, URL 200 via GET). Run before EVERY pack release. BUG-010.",
@@ -65,18 +65,25 @@
       "label": "Tooling: packenv resolve check (paths/ids)",
       "type": "shell",
       "command": "python3 packenv.py --check",
-      "detail": "Print every canonical path/id packenv resolves on THIS machine (✓/✗ = exists) + which secrets are set. Run after a machine move / renamed instance to confirm .env overrides land. Single source of truth for all pack tooling.",
+      "detail": "Print every canonical path/id packenv resolves on THIS machine (\u2713/\u2717 = exists) + which secrets are set. Run after a machine move / renamed instance to confirm .env overrides land. Single source of truth for all pack tooling.",
       "problemMatcher": []
     },
     {
       "label": "Tooling: regenerate ARCHITECTURE.md (arch map)",
       "type": "shell",
       "command": "python3 arch_map.py",
-      "detail": "Statically AST-scan every *.py in this repo (no imports/execution) and regenerate ARCHITECTURE.md — a Mermaid diagram + overview table showing which script imports which, and which packenv data artifact (bundles, manifest, repos.json, instances, CF/Modrinth secrets) each one touches. Run after adding/removing a script or a packenv key; `python3 arch_map.py --check` (exit non-zero if stale) is the CI/preflight form.",
+      "detail": "Statically AST-scan every *.py in this repo (no imports/execution) and regenerate ARCHITECTURE.md \u2014 a Mermaid diagram + overview table showing which script imports which, and which packenv data artifact (bundles, manifest, repos.json, instances, CF/Modrinth secrets) each one touches. Run after adding/removing a script or a packenv key; `python3 arch_map.py --check` (exit non-zero if stale) is the CI/preflight form.",
       "problemMatcher": []
     },
     {
-      "label": "Pack: server bootstrap parity (check) — PREFLIGHT",
+      "label": "Pack: bundle regression gate (no downgrade vs published cut)",
+      "type": "shell",
+      "command": "python3 bundle_regression_gate.py",
+      "detail": "GATE 10: every mod in the mod-director bundles must be >= the newest version ever published (scan all 'release: cut' commits). Catches a reverse-sync/edit that silently downgraded a fileID/version (a2ee2f28). Pinned mods (FileDirector) exempt. Exit 2 on regression.",
+      "problemMatcher": []
+    },
+    {
+      "label": "Pack: server bootstrap parity (check) \u2014 PREFLIGHT",
       "type": "shell",
       "command": "python3 server_bootstrap_parity.py",
       "detail": "GATE 8: the server launcher (lwjgl3ify forgePatches jar + 3startserver.sh/.bat) matches the bundle version, AND no client-only (side=CLIENT) mod sits on the server. Untracked by mod-director/pack_sync. Exit 2 on drift.",
@@ -93,7 +100,7 @@
       "label": "Pack: sync bundle fileIDs vs GitHub (audit)",
       "type": "shell",
       "command": "python3 pack_sync.py --audit",
-      "detail": "Compare pack bundles vs real GitHub releases — catches stale forks outside the tracking. Preflight before a pack release.",
+      "detail": "Compare pack bundles vs real GitHub releases \u2014 catches stale forks outside the tracking. Preflight before a pack release.",
       "problemMatcher": []
     },
     {
@@ -104,23 +111,23 @@
       "problemMatcher": []
     },
     {
-      "label": "Pack: publish changelog (derive→preview)",
+      "label": "Pack: publish changelog (derive\u2192preview)",
       "type": "shell",
       "command": "python3 changelog_publish.py --derive ${input:changelogBaseline} --version ${input:packVersion}",
       "options": {
         "cwd": "${env:HOME}/Documents/GitHub/privates-minecraft-modpack"
       },
-      "detail": "Derive (bundles+config since baseline) → preview the publish-ready block. For curated wording: derive to a file, edit it, then changelog_publish.py --from-derive <file>.",
+      "detail": "Derive (bundles+config since baseline) \u2192 preview the publish-ready block. For curated wording: derive to a file, edit it, then changelog_publish.py --from-derive <file>.",
       "problemMatcher": []
     },
     {
-      "label": "Pack: publish changelog (derive→PREPEND)",
+      "label": "Pack: publish changelog (derive\u2192PREPEND)",
       "type": "shell",
       "command": "python3 changelog_publish.py --derive ${input:changelogBaseline} --version ${input:packVersion} --prepend",
       "options": {
         "cwd": "${env:HOME}/Documents/GitHub/privates-minecraft-modpack"
       },
-      "detail": "Insert the derived block into the pack CHANGELOG for real (uncurated — prefer --from-derive with a curated file for player-facing wording).",
+      "detail": "Insert the derived block into the pack CHANGELOG for real (uncurated \u2014 prefer --from-derive with a curated file for player-facing wording).",
       "problemMatcher": []
     },
     {
@@ -226,7 +233,7 @@
       "options": {
         "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities"
       },
-      "detail": "Derive the WHOLE pack changelog for <baseline>..HEAD from git: mod add/update/remove (mod-director bundles + CF manifest, version-aware) PLUS game-config changes (src/common/config, mod-director/ excluded — one line per changed file, dirs with many files summarized, comment/blank-only edits filtered as noise). Baseline = commit of the last PUBLISHED pack version, not the last commit. Curate wording at release. Add --config-only / --no-config to scope.",
+      "detail": "Derive the WHOLE pack changelog for <baseline>..HEAD from git: mod add/update/remove (mod-director bundles + CF manifest, version-aware) PLUS game-config changes (src/common/config, mod-director/ excluded \u2014 one line per changed file, dirs with many files summarized, comment/blank-only edits filtered as noise). Baseline = commit of the last PUBLISHED pack version, not the last commit. Curate wording at release. Add --config-only / --no-config to scope.",
       "problemMatcher": []
     },
     {
@@ -236,7 +243,7 @@
       "options": {
         "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities"
       },
-      "detail": "Drive /spark profiler via matoulib RPC (game must be up, -Dmatoulib.rpc=true). Saves .sparkprofile locally — NEVER uploads (spark.lucko.me = public).",
+      "detail": "Drive /spark profiler via matoulib RPC (game must be up, -Dmatoulib.rpc=true). Saves .sparkprofile locally \u2014 NEVER uploads (spark.lucko.me = public).",
       "problemMatcher": []
     },
     {
@@ -260,7 +267,7 @@
       "problemMatcher": []
     },
     {
-      "label": "Pipeline: status (repo→release→CF→pack→instances)",
+      "label": "Pipeline: status (repo\u2192release\u2192CF\u2192pack\u2192instances)",
       "type": "shell",
       "command": "python3 pipeline_status.py",
       "options": {
