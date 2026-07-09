@@ -711,6 +711,30 @@ def verify_one(mod, skip_build, skip_boot):
     return ok
 
 
+def _capture_cf_file_id(mod, file_id):
+    """Write a freshly-uploaded CurseForge file id into the manifest's pack.cf_file_id, so the next
+    pack_sync bumps the mod-director bundle to exactly this file (no manual copy — the id was lost
+    to a print() before, 2026-07-09). Persists even if a later publish leg fails: the CF file is
+    real, so its id is correct to record. No-op if the mod has no pack block (not bundle-delivered)."""
+    try:
+        data = json.load(open(MANIFEST, encoding="utf-8"))
+    except Exception as e:
+        log(f"⚠ could not read manifest to capture CF file id {file_id}: {e}")
+        return
+    for m in data["mods"]:
+        if m["name"] == mod["name"] and isinstance(m.get("pack"), dict):
+            old = m["pack"].get("cf_file_id")
+            if old == file_id:
+                log(f"CF file id {file_id} already in manifest (no change)")
+                return
+            m["pack"]["cf_file_id"] = file_id
+            json.dump(data, open(MANIFEST, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
+            open(MANIFEST, "a", encoding="utf-8").write("\n")
+            log(f"captured CF file id {file_id} -> manifest pack.cf_file_id (was {old})")
+            return
+    log(f"⚠ {mod['name']}: no pack block in manifest — CF file id {file_id} NOT captured")
+
+
 def _sanitize_at_mentions(text):
     """Backtick-wrap bare @Word tokens (mixin annotations: @Overwrite/@Inject/@Redirect/…) so a GitHub
     release body doesn't turn them into user @-mentions (bogus 'Contributors'). Leaves tokens already
@@ -938,8 +962,16 @@ def release_one(mod, execute, skip_build, changelog_override=None, force_cf=Fals
                           "--release-type", "release", "--changelog-file", notes]
                 if force_cf:
                     cf_cmd.append("--force")  # per-target: let cf_upload's own duplicate guard through
-                run(cf_cmd, capture=False)
+                cf_out, _ = run(cf_cmd, capture=True)
+                print(cf_out)
                 log("CurseForge upload done")
+                # AUTO-CAPTURE: write the uploaded file id back into the manifest so pack_sync bumps the
+                # bundle to it — closes the upload->manifest->pack_sync loop (no manual copy, nothing lost).
+                m_id = re.search(r"file id:\s*(\d+)", cf_out)
+                if m_id:
+                    _capture_cf_file_id(mod, int(m_id.group(1)))
+                else:
+                    log("⚠ could not parse CF file id from upload output — set pack.cf_file_id manually")
             else:
                 log(f"CurseForge: {cf_note} — skip")
 
