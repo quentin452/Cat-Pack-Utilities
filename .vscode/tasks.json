@@ -62,6 +62,13 @@
       "problemMatcher": []
     },
     {
+      "label": "Tooling: packenv resolve check (paths/ids)",
+      "type": "shell",
+      "command": "python3 packenv.py --check",
+      "detail": "Print every canonical path/id packenv resolves on THIS machine (✓/✗ = exists) + which secrets are set. Run after a machine move / renamed instance to confirm .env overrides land. Single source of truth for all pack tooling.",
+      "problemMatcher": []
+    },
+    {
       "label": "Pack: server bootstrap parity (check) — PREFLIGHT",
       "type": "shell",
       "command": "python3 server_bootstrap_parity.py",
