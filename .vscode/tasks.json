@@ -69,6 +69,13 @@
       "problemMatcher": []
     },
     {
+      "label": "Tooling: regenerate ARCHITECTURE.md (arch map)",
+      "type": "shell",
+      "command": "python3 arch_map.py",
+      "detail": "Statically AST-scan every *.py in this repo (no imports/execution) and regenerate ARCHITECTURE.md — a Mermaid diagram + overview table showing which script imports which, and which packenv data artifact (bundles, manifest, repos.json, instances, CF/Modrinth secrets) each one touches. Run after adding/removing a script or a packenv key; `python3 arch_map.py --check` (exit non-zero if stale) is the CI/preflight form.",
+      "problemMatcher": []
+    },
+    {
       "label": "Pack: server bootstrap parity (check) — PREFLIGHT",
       "type": "shell",
       "command": "python3 server_bootstrap_parity.py",
