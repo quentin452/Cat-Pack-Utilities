@@ -61,6 +61,17 @@ def git_show(repo, ref, path):
     return r.stdout if r.returncode == 0 else None
 
 
+def commit_justif(repo, old_ref, new_ref, needle, path):
+    """Subject of the newest commit in old..new that added/removed a line containing `needle`
+    (a fileName or fileId) in `path` — the WHY behind a mod add/remove, straight from the commit
+    ("the commit IS the changelog entry"). Empty when no such commit (e.g. squashed history)."""
+    r = subprocess.run(
+        ["git", "-C", repo, "log", f"{old_ref}..{new_ref}", "--format=%s", f"-S{needle}", "--", path],
+        capture_output=True, text=True)
+    lines = [ln.strip() for ln in (r.stdout or "").splitlines() if ln.strip()]
+    return lines[0] if lines else ""
+
+
 def side_of(e):
     return ((e.get("metadata") or {}).get("side") or "BOTH").upper()
 
@@ -285,34 +296,41 @@ def main():
             new = pfn(git_show(pack, new_ref, path))
             for k, v in new.items():
                 if k not in old:
-                    added.append((v["label"], v["side"]))
+                    added.append((v["label"], v["side"],
+                                  commit_justif(pack, old_ref, new_ref, v["label"], path)))
                 elif old[k]["version"] != v["version"]:
                     updated.append((old[k]["label"], v["label"], v["side"],
-                                    old[k]["version"], v["version"]))
+                                    old[k]["version"], v["version"],
+                                    commit_justif(pack, old_ref, new_ref, str(v["version"]), path)))
             for k, v in old.items():
                 if k not in new:
-                    removed.append((v["label"], v["side"]))
+                    removed.append((v["label"], v["side"],
+                                    commit_justif(pack, old_ref, new_ref, v["label"], path)))
 
     cfg_changes, cfg_skipped = (config_changes(pack, old_ref, new_ref) if want_config else ([], 0))
 
     scope = "config" if config_only else ("bundles" if not want_config else "bundles + config")
     print(f"# pack changelog ({scope})  {old_ref}..{new_ref}\n")
+    def justtag(j):
+        # append the commit's WHY (curate the wording at publish; it's a draft)
+        return f" — {j}" if j else ""
+
     if updated:
         print("**mods updated**")
-        for oldl, newl, side, oldv, newv in sorted(updated):
+        for oldl, newl, side, oldv, newv, j in sorted(updated):
             # when the label carries no version (e.g. CF manifest = a stable name), show the id delta
             body = f"{oldl} -> {newl}" if oldl != newl else f"{oldl} (fileID {oldv} -> {newv})"
-            print(f"* {body}{sidetag(side)}")
+            print(f"* {body}{sidetag(side)}{justtag(j)}")
         print()
     if added:
         print("**mods added**")
-        for label, side in sorted(added):
-            print(f"* {label}{sidetag(side)}")
+        for label, side, j in sorted(added):
+            print(f"* {label}{sidetag(side)}{justtag(j)}")
         print()
     if removed:
         print("**mods deleted**")
-        for label, side in sorted(removed):
-            print(f"* {label}{sidetag(side)}")
+        for label, side, j in sorted(removed):
+            print(f"* {label}{sidetag(side)}{justtag(j)}")
         print()
     render_config(cfg_changes, cfg_skipped)
     if not (added or updated or removed or cfg_changes or cfg_skipped):
