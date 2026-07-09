@@ -33,7 +33,9 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-DEFAULT_INSTANCE = Path.home() / "Documents/curseforge/minecraft/Instances/Biggess Pack Cat Edition V1 TEST"
+import packenv as E
+
+DEFAULT_INSTANCE = Path(E.INSTANCE_TEST)
 
 
 def rpc_cmd(base: str, command: str, timeout: int = 30) -> str:

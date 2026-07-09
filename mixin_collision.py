@@ -40,6 +40,8 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+import packenv as E
+
 # --- injection-type taxonomy -------------------------------------------------
 # EXCLUSIVE / rewriting handlers: they replace or reroute a whole method body or an
 # invoke inside it. Two of these on the SAME method = real contention.
@@ -608,16 +610,8 @@ def print_table(findings, oat_stats, scan_stats):
 # =============================================================================
 
 def read_env_mods(util_root):
-    """Resolve pack mods dir from Cat-Pack-Utilities/.env (INSTANCE_PATH)."""
-    env = Path(util_root) / ".env"
-    if not env.exists():
-        return None
-    for line in env.read_text().splitlines():
-        m = re.match(r"\s*INSTANCE_PATH\s*=\s*(.+)", line)
-        if m:
-            base = m.group(1).strip().strip('"')
-            return str(Path(base) / "mods")
-    return None
+    """Resolve pack mods dir via packenv (historical INSTANCE_PATH key, back-compat'd there)."""
+    return E.INSTANCE_TEST_MODS
 
 
 def main():
@@ -629,7 +623,7 @@ def main():
                "HIGH=OaT @Overwrite on a class another mod also mixes; "
                "MEDIUM=same method @Redirect/@ModifyX both sides; LOW=@Inject overlap.",
     )
-    ap.add_argument("--oat", default=str(Path.home() / "Documents/GitHub/OptimizationsAndTweaks"),
+    ap.add_argument("--oat", default=os.path.join(E.GITHUB_ROOT, "OptimizationsAndTweaks"),
                     help="OaT repo root (default: ~/Documents/GitHub/OptimizationsAndTweaks)")
     ap.add_argument("--mods", default=None,
                     help="Pack mods dir (default: from .env INSTANCE_PATH + /mods)")

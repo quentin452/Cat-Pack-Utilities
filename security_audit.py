@@ -18,7 +18,9 @@ import os
 import subprocess
 import sys
 
-REPOS = os.path.expanduser("~/Documents/GitHub/Mod-Sandbox/memory/repos.json")
+import packenv as E
+
+REPOS = E.REPOS_JSON
 
 
 def gh_json(path):

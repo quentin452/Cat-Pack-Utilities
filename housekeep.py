@@ -21,7 +21,9 @@ import argparse
 import os
 import re
 
-HUB = os.path.expanduser("~/Documents/GitHub/Mod-Sandbox/memory")
+import packenv as E
+
+HUB = os.path.join(E.HUB, "memory")
 BUGS = os.path.join(HUB, "BUGS.md")
 BUGS_ARCHIVE = os.path.join(HUB, "BUGS-archive.md")
 

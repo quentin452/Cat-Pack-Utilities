@@ -58,8 +58,8 @@ import urllib.parse
 import urllib.request
 from collections import defaultdict
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-HOME = os.path.expanduser("~")
+import packenv as E
+
 CF_API = "https://api.curseforge.com"
 
 # --- exclusions / whitelist --------------------------------------------------
@@ -86,30 +86,19 @@ def log(msg):
 
 # --- env / paths -------------------------------------------------------------
 def load_env():
-    conf = {}
-    for name in (".env", ".env.local"):
-        path = os.path.join(SCRIPT_DIR, name)
-        if not os.path.isfile(path):
-            continue
-        for line in open(path, encoding="utf-8"):
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            conf[k.strip()] = v.strip().strip("'\"")
-    for k, v in os.environ.items():
-        if k in ("CF_API_KEY", "CANONICAL_CONFIG") or (k.startswith("INSTANCE_") and k.endswith("_CONFIG")):
-            conf[k] = v
-    return conf
+    """Back-compat public helper (used by release_changeset.py): the canonical/instance config dirs
+    as a dict, now sourced from packenv. Kept so external callers don't break after the packenv move."""
+    return {
+        "CANONICAL_CONFIG": E.CANONICAL_CONFIG,
+        "INSTANCE_TEST_CONFIG": E.INSTANCE_TEST_CONFIG,
+        "INSTANCE_SERVER_CONFIG": E.INSTANCE_SERVER_CONFIG,
+    }
 
 
-def resolve_instances(env):
-    """{name: config_dir} from INSTANCE_<NAME>_CONFIG (config_sync convention)."""
-    out = {}
-    for k, v in env.items():
-        if k.startswith("INSTANCE_") and k.endswith("_CONFIG") and v:
-            out[k[len("INSTANCE_"):-len("_CONFIG")]] = v
-    return out
+def resolve_instances(env=None):
+    """{name: config_dir} for the known TEST/SERVER instances (packenv). Accepts an optional env dict
+    for back-compat with callers that still pass load_env()'s result; packenv is the source of truth."""
+    return {"TEST": E.INSTANCE_TEST_CONFIG, "SERVER": E.INSTANCE_SERVER_CONFIG}
 
 
 # --- declared set (bundles + manifest) ---------------------------------------
@@ -322,8 +311,7 @@ def report(res, declared, installed, mods_dir, canonical_config, as_json):
 
 
 def main():
-    env = load_env()
-    instances = resolve_instances(env)
+    instances = resolve_instances()
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--instance", default=None,
                     help="instance name from INSTANCE_<NAME>_CONFIG (default: TEST, else the first)")
@@ -333,7 +321,7 @@ def main():
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     args = ap.parse_args()
 
-    canonical = args.canonical_config or env.get("CANONICAL_CONFIG")
+    canonical = args.canonical_config or E.CANONICAL_CONFIG
     if not canonical or not os.path.isdir(canonical):
         sys.exit(f"canonical config dir not found: {canonical!r} — set CANONICAL_CONFIG (.env) or "
                  "pass --canonical-config.")
@@ -353,7 +341,7 @@ def main():
     if not os.path.isdir(mods_dir):
         sys.exit(f"instance mods dir not found: {mods_dir}")
 
-    cf_key = env.get("CF_API_KEY")
+    cf_key = E.cf_api_key()
     declared = collect_declared(canonical, cf_key)
     installed, disabled = scan_instance(mods_dir)
     res = classify(declared, installed, disabled)

@@ -42,6 +42,7 @@ import urllib.request
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
+import packenv as E  # noqa: E402 — shared path/id/secret source of truth
 import make_minimal_instance as mmi  # noqa: E402 — reuse poll_boot/kill_instance/INSTANCES/JAVA
 from modrinth_upload import normalize_modrinth_version  # noqa: E402 — CONCERN B: shared strip-V
 from changelog_from_git import commit_type  # noqa: E402 — shared conventional-commit type classifier
@@ -51,7 +52,7 @@ CF_READ_API = "https://api.curseforge.com"       # read API (CF_API_KEY) — exi
 MODRINTH_API = "https://api.modrinth.com/v2"
 # The manifest (release plan) lives in the Mod-Sandbox hub (planning data, versioned +
 # auto-pushed, next to pipeline-mods.md). Override with --manifest.
-MANIFEST = os.path.expanduser("~/Documents/GitHub/Mod-Sandbox/memory/release-manifest.json")
+MANIFEST = E.RELEASE_MANIFEST
 # BOOT-VERIFY gate helpers (sibling scripts, reused as subprocesses / a module).
 MMI_SCRIPT = os.path.join(SCRIPT_DIR, "make_minimal_instance.py")
 CRASH_SCAN = os.path.join(SCRIPT_DIR, "boot_crash_scan.py")
@@ -87,25 +88,6 @@ def origin_slug(repo):
     url = git(repo, "remote", "get-url", "origin", check=False)
     m = re.search(r"github\.com[:/]([^/]+/[^/.]+?)(?:\.git)?$", url)
     return m.group(1) if m else None
-
-
-def read_env(key):
-    """Read KEY from .env / .env.local (real env wins) — used for the CF_API_KEY read key. Never
-    prints the value."""
-    if os.environ.get(key):
-        return os.environ[key]
-    for name in (".env", ".env.local"):
-        path = os.path.join(SCRIPT_DIR, name)
-        if not os.path.isfile(path):
-            continue
-        for line in open(path):
-            line = line.strip()
-            if line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            if k.strip() == key:
-                return v.strip().strip("'\"")
-    return None
 
 
 # --- auto-versioning: derive the NEXT release version from git tags ---------------------------
@@ -1010,7 +992,7 @@ def main():
         if not override:
             sys.exit(f"--changelog-file {args.changelog_file} is empty")
 
-    cf_api_key = read_env("CF_API_KEY")  # read key (never printed) — for the CF existence probe
+    cf_api_key = E.cf_api_key()  # read key (never printed) — for the CF existence probe
 
     # --verify: local build/test/audit ONLY. Dispatched BEFORE Stage 1/2 and returns here, so
     # release_one() (the only path that tags/pushes/uploads) is NEVER reached. --verify wins over

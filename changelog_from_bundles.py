@@ -34,20 +34,22 @@ import re
 import subprocess
 import sys
 
-REPO_DEFAULT = os.path.expanduser("~/Documents/GitHub/privates-minecraft-modpack")
-MODPACK_SUB = "MODPACKS/Biggess Pack Cat Edition"  # git paths are relative to the REPO ROOT
-BUNDLES = [f"{MODPACK_SUB}/src/common/config/mod-director/curse.bundle.json",
-           f"{MODPACK_SUB}/src/common/config/mod-director/url.bundle.json",
-           f"{MODPACK_SUB}/src/common/config/mod-director/modrinth.bundle.json"]
+import packenv as E
+
+REPO_DEFAULT = E.PACK_REPO
+MODPACK_SUB = os.path.relpath(E.PACK_DIR, E.PACK_REPO)  # git paths are relative to the REPO ROOT
+BUNDLES = [os.path.relpath(E.CURSE_BUNDLE, E.PACK_REPO),
+           os.path.relpath(E.URL_BUNDLE, E.PACK_REPO),
+           E.MODRINTH_BUNDLE]
 # FileDirector (and any CF-pack-manifest mod) is delivered OUTSIDE the mod-director bundles — via the
 # CurseForge pack manifest (client) + a direct server jar. Diff the manifest too, else FileDirector's
 # own version bumps are invisible in the changelog (the trap: it's not in any bundle).
-CLIENT_MANIFEST = f"{MODPACK_SUB}/src/client/manifest.json"
+CLIENT_MANIFEST = os.path.relpath(E.CLIENT_MANIFEST, E.PACK_REPO)
 
 # --- config-change derivation (game config, NOT the mod-director bundles) -------------------------
 # The shipped game config lives here. mod-director/ is a subdir of it but is already the bundle diff
 # above, so it is excluded to avoid double-reporting the same mod add/update/remove.
-CONFIG_SUB = f"{MODPACK_SUB}/src/common/config"
+CONFIG_SUB = os.path.relpath(E.CANONICAL_CONFIG, E.PACK_REPO)
 CONFIG_PREFIX = CONFIG_SUB + "/"
 CONFIG_EXCLUDE = ("mod-director/",)   # covered by the bundle/manifest diff
 GROUP_THRESHOLD = 4                   # a config subdir with >= this many changed files -> one summary line

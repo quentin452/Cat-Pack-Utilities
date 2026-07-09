@@ -30,29 +30,12 @@ import sys
 import urllib.parse
 import urllib.request
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+import packenv as E
+
 CF_API = "https://api.curseforge.com"
-DEFAULT_DIR = os.path.expanduser(
-    "~/Documents/GitHub/privates-minecraft-modpack/MODPACKS/Biggess Pack Cat Edition/src/common/config/mod-director"
-)
+DEFAULT_DIR = E.MOD_DIRECTOR
 # CurseForge fileStatus: 4 = Approved (the only value safe to ship).
 CF_APPROVED = 4
-
-
-def load_dotenv():
-    conf = {}
-    for name in (".env", ".env.local"):
-        path = os.path.join(SCRIPT_DIR, name)
-        if not os.path.isfile(path):
-            continue
-        for line in open(path):
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            conf[k.strip()] = v.strip().strip("'\"")
-    conf.update({k: v for k, v in os.environ.items() if k in ("CF_API_KEY",)})
-    return conf
 
 
 def http_json(url, method="GET", body=None, headers=None):
@@ -269,8 +252,7 @@ def main():
         print("[bundle-check] checking URLs...")
         problems += check_urls(url)
     if not args.urls_only:
-        env = load_dotenv()
-        key = env.get("CF_API_KEY")
+        key = E.cf_api_key()
         if not key:
             print("[bundle-check] WARN: CF_API_KEY absent — CurseForge checks skipped "
                   "(set it in .env.local or use --urls-only)")

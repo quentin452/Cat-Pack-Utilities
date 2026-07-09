@@ -37,11 +37,13 @@ import re
 import shutil
 import sys
 
-PACK = os.path.expanduser("~/Documents/GitHub/privates-minecraft-modpack/MODPACKS/Biggess Pack Cat Edition")
-MOD_DIRECTOR = os.path.join(PACK, "src/common/config/mod-director")
-CURSE_BUNDLE = os.path.join(MOD_DIRECTOR, "curse.bundle.json")
-URL_BUNDLE = os.path.join(MOD_DIRECTOR, "url.bundle.json")
-SERVER_SRC = os.path.join(PACK, "src/server")
+import packenv as E
+
+PACK = E.PACK_DIR
+MOD_DIRECTOR = E.MOD_DIRECTOR
+CURSE_BUNDLE = E.CURSE_BUNDLE
+URL_BUNDLE = E.URL_BUNDLE
+SERVER_SRC = E.SERVER_SRC
 
 # Bundle mods that ALSO have a hardcoded server-side bootstrap that must mirror the bundle version.
 # fileName_re: capture the version from the bundle entry's fileName (the source of truth = what

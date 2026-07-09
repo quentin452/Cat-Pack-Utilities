@@ -23,7 +23,9 @@ import re
 import sys
 from pathlib import Path
 
-OAT = Path.home() / "Documents/GitHub/OptimizationsAndTweaks"
+import packenv as E
+
+OAT = Path(E.GITHUB_ROOT) / "OptimizationsAndTweaks"
 ENUM = OAT / "src/main/java/fr/iamacat/optimizationsandtweaks/asm/Mixin.java"
 MIXINS_ROOT = OAT / "src/main/java/fr/iamacat/optimizationsandtweaks/mixins"
 

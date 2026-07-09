@@ -23,8 +23,10 @@ import sys
 import time
 import urllib.request
 
+import packenv as E
+
 RPC = "http://127.0.0.1:25580"
-ASPROF = os.path.expanduser("~/Documents/GitHub/async-profiler/build/bin/asprof")
+ASPROF = os.path.join(E.GITHUB_ROOT, "async-profiler/build/bin/asprof")
 
 # Subsystem buckets: a sample is attributed to the bucket of its DEEPEST matching frame
 # (= where the CPU actually is). Order within a list does not matter; substrings are matched

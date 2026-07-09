@@ -28,12 +28,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pack_sync  # reuse: find_curse_entry / find_manifest_entry / find_url_entry / load_api_key
+import packenv as E
 
 HERE = Path(__file__).resolve().parent
-MANIFEST = Path.home() / "Documents/GitHub/Mod-Sandbox/memory/release-manifest.json"
-PACK_REPO = Path.home() / "Documents/GitHub/privates-minecraft-modpack"
-PACK_DIR = PACK_REPO / "MODPACKS/Biggess Pack Cat Edition"
-PACK_PROJECT_ID = 830694
+MANIFEST = Path(E.RELEASE_MANIFEST)
+PACK_REPO = Path(E.PACK_REPO)
+PACK_DIR = Path(E.PACK_DIR)
+PACK_PROJECT_ID = E.PACK_PROJECT_ID
 NOISE = re.compile(r"^(chore|docs|test|style|ci)(\(|:)", re.IGNORECASE)
 
 

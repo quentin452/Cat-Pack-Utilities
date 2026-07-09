@@ -27,9 +27,11 @@ import time
 import urllib.request
 import zipfile
 
-HOME = os.path.expanduser("~")
-INSTANCES = os.path.join(HOME, "Documents/curseforge/minecraft/Instances")
-PACK = os.path.join(INSTANCES, "Biggess Pack Cat Edition V1 TEST")
+import packenv as E
+
+HOME = E.HOME
+INSTANCES = E.INSTANCES_ROOT
+PACK = E.INSTANCE_TEST
 BASE = os.path.join(INSTANCES, "Minimal-Pathfinding")  # plumbing + coremod baseline template
 JAVA = "/usr/lib/jvm/default-runtime/bin/java"
 RPC = "http://127.0.0.1:25580/ping"

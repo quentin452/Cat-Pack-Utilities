@@ -40,15 +40,20 @@ import os
 import shutil
 import sys
 
+import packenv as E
+
 HOME = os.path.expanduser("~")
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # --- built-in fallback (used only if nothing is set in env / .env / .env.local) ---
-_DEF_PACK = "Biggess Pack Cat Edition"
-_DEF_CANONICAL = os.path.join(HOME, "Documents/GitHub/privates-minecraft-modpack/MODPACKS", _DEF_PACK, "src/common/config")
+# Sourced from packenv (single source of truth); config_sync's OWN load_env()/resolve_paths()
+# dynamic INSTANCE_<NAME>_CONFIG scan below is untouched — these are only the last-resort default
+# when NO INSTANCE_*_CONFIG key is set anywhere (env / .env.local / .env).
+_DEF_PACK = E.PACK_NAME
+_DEF_CANONICAL = E.CANONICAL_CONFIG
 _DEF_INSTANCES = {
-    "TEST":   os.path.join(HOME, "Documents/curseforge/minecraft/Instances", _DEF_PACK + " V1 TEST", "config"),
-    "server": os.path.join(HOME, "Bureau/SERVERS", _DEF_PACK + " V1 Server", "config"),
+    "TEST":   E.INSTANCE_TEST_CONFIG,
+    "server": E.INSTANCE_SERVER_CONFIG,
 }
 
 # --- machine-junk denylist (REVERSE only): never flows instance -> canonical ---

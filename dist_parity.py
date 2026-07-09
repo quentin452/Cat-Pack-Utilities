@@ -43,6 +43,8 @@ import sys
 import urllib.error
 import urllib.request
 
+import packenv as E
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Reuse the SINGLE source of truth for a version's Modrinth form (strip a leading V) so V1.2.3 /
@@ -50,10 +52,10 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 from release_mods import normalize_modrinth_version  # noqa: E402
 
-HUB = os.path.expanduser("~/Documents/GitHub/Mod-Sandbox/memory")
-REPOS_JSON = os.path.join(HUB, "repos.json")
-MANIFEST_JSON = os.path.join(HUB, "release-manifest.json")
-HUB_MD_DIR = os.path.expanduser("~/Documents/GitHub/ModsandModpackMinecraftHub")
+HUB = os.path.join(E.HUB, "memory")
+REPOS_JSON = E.REPOS_JSON
+MANIFEST_JSON = E.RELEASE_MANIFEST
+HUB_MD_DIR = os.path.join(E.GITHUB_ROOT, "ModsandModpackMinecraftHub")
 HUB_MD_FILES = [
     os.path.join(HUB_MD_DIR, "Mods", "1.7.10.MD"),
     os.path.join(HUB_MD_DIR, "Modpacks", "1.7.10.MD"),
@@ -70,19 +72,8 @@ UA = "dist-parity/1.0 (personal-mod release-parity checker)"
 # ---------------------------------------------------------------------------- env / http helpers
 
 def load_cf_key():
-    """CF read key (CF_API_KEY) from .env/.env.local — same convention as bundle_check/cf_upload."""
-    conf = {}
-    for name in (".env", ".env.local"):
-        path = os.path.join(SCRIPT_DIR, name)
-        if not os.path.isfile(path):
-            continue
-        for line in open(path):
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            conf[k.strip()] = v.strip().strip("'\"")
-    return os.environ.get("CF_API_KEY") or conf.get("CF_API_KEY")
+    """CF read key (CF_API_KEY) — delegates to packenv (process env > .env.local > .env)."""
+    return E.cf_api_key()
 
 
 def http_json(url, headers=None):

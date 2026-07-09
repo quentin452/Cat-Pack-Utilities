@@ -14,9 +14,11 @@ import os
 import subprocess
 import sys
 
-GITHUB_DIR = os.path.expanduser("~/Documents/GitHub")
-OUT = os.path.expanduser("~/Documents/GitHub/Mod-Sandbox/memory/repos.json")
-MANIFEST = os.path.expanduser("~/Documents/GitHub/Mod-Sandbox/memory/release-manifest.json")
+import packenv as E
+
+GITHUB_DIR = E.GITHUB_ROOT
+OUT = E.REPOS_JSON
+MANIFEST = E.RELEASE_MANIFEST
 OWNER_PAT = ("quentin452", "iamacat")
 
 # is_fork is defined strictly as "has an `upstream` remote" — reproducible, and exactly what the

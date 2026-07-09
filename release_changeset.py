@@ -54,8 +54,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bundle_drift  # reuse: env/paths, bundle readers, instance scan, classify, base_key
 import changelog_from_git  # reuse: commit_type (the shared conventional-commit classifier)
+import packenv as E  # shared path/id/secret source of truth
 
-REPOS_JSON = os.path.expanduser("~/Documents/GitHub/Mod-Sandbox/memory/repos.json")
+REPOS_JSON = E.REPOS_JSON
 # MC-version / packaging tokens that are NOT a mod's own version (skip when guessing a curse version).
 _MC_TOKENS = {"1.7.10", "1.7.2", "mc1.7.10", "mc1.7.2", "1.12.2", "1.11.1", "1.11", "1.10.2"}
 _VER_TOK = re.compile(r"^v?\d")

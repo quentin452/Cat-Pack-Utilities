@@ -22,19 +22,20 @@ import os
 import shutil
 import sys
 
-HOME = os.path.expanduser("~")
-MANIFEST = os.path.join(HOME, "Documents/GitHub/Mod-Sandbox/memory/release-manifest.json")
+import packenv as E
+
+MANIFEST = E.RELEASE_MANIFEST
 
 INSTANCES = {
     # The non-TEST "Biggess Pack Cat Edition V1" instance was deleted (it was a 2nd test instance).
-    "TEST":   os.path.join(HOME, "Documents/curseforge/minecraft/Instances/Biggess Pack Cat Edition V1 TEST/mods"),
-    "server": os.path.join(HOME, "Bureau/SERVERS/Biggess Pack Cat Edition V1 Server/mods"),
+    "TEST":   E.INSTANCE_TEST_MODS,
+    "server": E.INSTANCE_SERVER_MODS,
 }
 
 # Mods not in the release manifest but still swapped locally (devtools). gigafauna is
 # TEST-only (devtools; needs geckolib-unofficial-1.0.3.jar there too — install once by hand).
 EXTRA_MODS = [
-    {"name": "gigafauna", "repo": os.path.join(HOME, "Documents/GitHub/matoulib"),
+    {"name": "gigafauna", "repo": os.path.join(E.GITHUB_ROOT, "matoulib"),
      "jar_glob": "build/libs/gigafauna-*.jar", "jar_exclude": ["-dev", "-sources", "-api"],
      "instances": ["TEST"]},
 ]

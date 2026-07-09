@@ -21,7 +21,9 @@ import re
 import subprocess
 import sys
 
-REPOS = os.path.expanduser("~/Documents/GitHub/Mod-Sandbox/memory/repos.json")
+import packenv as E
+
+REPOS = E.REPOS_JSON
 # noise types dropped from the player-facing view by default
 SKIP = re.compile(r"^(chore|tests?|docs?|style|ci|build|refactor|wip|merge|bump)\b|\bwip\b", re.I)
 CO = re.compile(r"^Co-Authored-By", re.I)

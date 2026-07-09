@@ -26,14 +26,15 @@ import sys
 import urllib.parse
 import urllib.request
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-HUB = os.path.expanduser("~/Documents/GitHub/Mod-Sandbox")
-MANIFEST = f"{HUB}/memory/release-manifest.json"
-PACK = os.path.expanduser("~/Documents/GitHub/privates-minecraft-modpack/MODPACKS/Biggess Pack Cat Edition")
-CURSE_BUNDLE = f"{PACK}/src/common/config/mod-director/curse.bundle.json"
-URL_BUNDLE = f"{PACK}/src/common/config/mod-director/url.bundle.json"
-CLIENT_MANIFEST = f"{PACK}/src/client/manifest.json"
-SERVER_MODS = f"{PACK}/src/server/mods"
+import packenv as E
+
+HUB = E.HUB
+MANIFEST = E.RELEASE_MANIFEST
+PACK = E.PACK_DIR
+CURSE_BUNDLE = E.CURSE_BUNDLE
+URL_BUNDLE = E.URL_BUNDLE
+CLIENT_MANIFEST = E.CLIENT_MANIFEST
+SERVER_MODS = E.SERVER_MODS
 CF_API = "https://api.curseforge.com"
 
 APPLY = "--apply" in sys.argv
@@ -45,19 +46,13 @@ problems = []
 changes = []
 
 
+def load_api_key():
+    """Back-compat public helper (used by pipeline_status.py): CF read key via packenv."""
+    return E.cf_api_key()
+
+
 def log(m):
     print(m)
-
-
-def load_api_key():
-    for name in (".env.local", ".env"):
-        p = os.path.join(SCRIPT_DIR, name)
-        if os.path.isfile(p):
-            for line in open(p):
-                line = line.strip()
-                if line.startswith("CF_API_KEY="):
-                    return line.split("=", 1)[1].strip().strip("'\"")
-    return os.environ.get("CF_API_KEY")
 
 
 def cf_files(file_ids, key):

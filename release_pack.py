@@ -55,21 +55,22 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import release_log  # noqa: E402 — append-only release-log.md logger (never throws)
+import packenv as E  # noqa: E402
 CF_READ_API = "https://api.curseforge.com"
-PACK_REPO = Path.home() / "Documents/GitHub/privates-minecraft-modpack"
-PACK_DIR = PACK_REPO / "MODPACKS/Biggess Pack Cat Edition"
+PACK_REPO = Path(E.PACK_REPO)
+PACK_DIR = Path(E.PACK_DIR)
 DIST = PACK_DIR / "dist"
-PACK_PROJECT_ID = 830694          # CF modpack project (biggess-pack-cat-edition)
+PACK_PROJECT_ID = E.PACK_PROJECT_ID          # CF modpack project (biggess-pack-cat-edition)
 GAME_VERSION = "1.7.10"
 # --boot-verify gate: boot the pack TEST instance + scan the boot log before shipping.
-PACK_TEST_INSTANCE = Path.home() / "Documents/curseforge/minecraft/Instances/Biggess Pack Cat Edition V1 TEST"
+PACK_TEST_INSTANCE = Path(E.INSTANCE_TEST)
 PACK_TEST_ARGFILE = "pack-worldgen.arg"   # auto-into-a-world argfile in the TEST instance
 PACK_BOOT_LOG = "boot-relverify.log"      # dedicated fresh log (the instance keeps many boot-*.log)
 JAVA = "/usr/lib/jvm/default-runtime/bin/java"
 CRASH_SCAN = HERE / "boot_crash_scan.py"
 PACK_BOOT_TIMEOUT = 660                    # the full pack boots in ~8 min
 # --smoke gate (GATE 4c): boot a throwaway server clone with the FRESH shipped binaries.
-RELEASE_MANIFEST = Path.home() / "Documents/GitHub/Mod-Sandbox/memory/release-manifest.json"
+RELEASE_MANIFEST = Path(E.RELEASE_MANIFEST)
 RELEASE_PY = HERE / "release.py"
 UPDATE_LOCAL = HERE / "update_local.py"
 # dirs never scanned for a mod's "newest source" mtime (build outputs / VCS / IDE / caches).
@@ -86,20 +87,6 @@ def run(cmd, gate, cwd=None, capture=False):
     if proc.returncode != 0:
         sys.exit(f"⛔ {gate} FAILED (exit {proc.returncode}) — NOT releasing.")
     return proc
-
-
-def cf_read_key():
-    """CF_API_KEY read key from env or .env.local/.env (never printed)."""
-    if os.environ.get("CF_API_KEY"):
-        return os.environ["CF_API_KEY"]
-    for name in (".env.local", ".env"):
-        p = HERE / name
-        if p.is_file():
-            for line in p.read_text().splitlines():
-                line = line.strip()
-                if line.startswith("CF_API_KEY="):
-                    return line.split("=", 1)[1].strip().strip("'\"")
-    return None
 
 
 def _bump_patch(ver):
@@ -159,7 +146,7 @@ def latest_pack_cut(pack_repo):
 def latest_cf_pack_version(project_id):
     """Highest V<x.y.z> already published on the CF pack project — fallback for auto --version when
     there is no local 'release: cut' commit. None if unverifiable (no read key / API error)."""
-    key = cf_read_key()
+    key = E.cf_api_key()
     if not key:
         return None
     url = f"{CF_READ_API}/v1/mods/{project_id}/files?pageSize=50"
@@ -185,7 +172,7 @@ def latest_cf_pack_version(project_id):
 def pack_already_published(project_id, version):
     """Return the CF file that already carries V<version> for this pack (dict), False if none, or
     None if UNVERIFIABLE (no read key / API error). Guards against re-shipping a live pack version."""
-    key = cf_read_key()
+    key = E.cf_api_key()
     if not key:
         return None
     url = f"{CF_READ_API}/v1/mods/{project_id}/files?pageSize=50"

@@ -28,13 +28,15 @@ import sys
 import time
 from pathlib import Path
 
+import packenv as E  # shared path/id/secret source of truth
+
 HOME = Path.home()
 
 # --- Paths -------------------------------------------------------------------
-SERVER_SRC = HOME / "Bureau/SERVERS/Biggess Pack Cat Edition V1 Server"
+SERVER_SRC = Path(E.INSTANCE_SERVER)
 SMOKE_CLONE = HOME / "Bureau/SERVERS/_smoke_clone"
-CLIENT_INSTANCE = HOME / "Documents/curseforge/minecraft/Instances/Biggess Pack Cat Edition V1 TEST"
-CLIENT_ARGFILE = HOME / "Documents/GitHub/Mod-Sandbox/docs/captures/client-relaunch.arg"
+CLIENT_INSTANCE = Path(E.INSTANCE_TEST)
+CLIENT_ARGFILE = Path(E.HUB) / "docs/captures/client-relaunch.arg"
 OAT_REPO = HOME / "Documents/GitHub/OptimizationsAndTweaks"
 
 JAVA = Path("/usr/lib/jvm/default-runtime/bin/java")  # java 21, what the pack runs on
@@ -60,7 +62,7 @@ ASYNC_PF_MARK = "[AsyncPathfinding]"    # our init/stats log lines
 # Client auto-join (V1): the client GUI boots ~900 mods then connects to the kept-alive smoke
 # server. Join is confirmed via the SERVER log (vanilla FML "joined the game") — reliable and
 # already captured, so no fragile client-log marker. Needs a DISPLAY (desktop session or Xvfb).
-CLIENT_GAMEDIR = HOME / "Documents/curseforge/minecraft/Instances/Biggess Pack Cat Edition V1 TEST"
+CLIENT_GAMEDIR = Path(E.INSTANCE_TEST)
 JOIN_MARK = "joined the game"
 CLIENT_TIMEOUT = 480
 

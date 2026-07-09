@@ -16,7 +16,9 @@ import os
 import subprocess
 import sys
 
-REPOS = os.path.expanduser("~/Documents/GitHub/Mod-Sandbox/memory/repos.json")
+import packenv as E
+
+REPOS = E.REPOS_JSON
 ME = "quentin452"
 
 

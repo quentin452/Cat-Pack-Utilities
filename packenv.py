@@ -66,6 +66,7 @@ HOME = _exp("~")
 GITHUB_ROOT = _exp(get("GITHUB_ROOT", os.path.join(HOME, "Documents/GitHub")))
 HUB = _exp(get("HUB", os.path.join(GITHUB_ROOT, "Mod-Sandbox")))
 REPOS_JSON = os.path.join(HUB, "memory", "repos.json")
+RELEASE_MANIFEST = os.path.join(HUB, "memory", "release-manifest.json")
 
 # ── the pack ──────────────────────────────────────────────────────────────────────────────────
 PACK_NAME = get("PACK", "Biggess Pack Cat Edition")            # historical key PACK = the NAME
@@ -79,6 +80,7 @@ CANONICAL_CONFIG = _exp(get("CANONICAL_CONFIG", os.path.join(SRC_COMMON, "config
 MOD_DIRECTOR = os.path.join(CANONICAL_CONFIG, "mod-director")
 CURSE_BUNDLE = os.path.join(MOD_DIRECTOR, "curse.bundle.json")
 URL_BUNDLE = os.path.join(MOD_DIRECTOR, "url.bundle.json")
+MODRINTH_BUNDLE = os.path.join(MOD_DIRECTOR, "modrinth.bundle.json")
 SERVER_SRC = os.path.join(PACK_DIR, "src", "server")
 SERVER_MODS = os.path.join(SERVER_SRC, "mods")
 CLIENT_SRC = os.path.join(PACK_DIR, "src", "client")
