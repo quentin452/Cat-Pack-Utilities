@@ -562,6 +562,12 @@ def _run_gates(args, rl):
     bootstrap_gate()
     rl.gate("GATE 8 server-bootstrap-parity", True)
 
+    # GATE 9 — ARCHITECTURE.md (tooling data-dependency map) must be current vs the *.py source, so a
+    # "data fetched from the wrong place" (e.g. a secret read outside packenv) can't hide behind a stale
+    # map. arch_map.py --check exits non-zero when ARCHITECTURE.md is stale.
+    run([sys.executable, HERE / "arch_map.py", "--check"], "GATE 9 (arch map up to date)")
+    rl.gate("GATE 9 arch-map-current", True)
+
 
 def main():
     ap = argparse.ArgumentParser(description="Gated modpack release pipeline.")
