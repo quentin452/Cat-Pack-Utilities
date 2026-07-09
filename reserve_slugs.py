@@ -154,10 +154,19 @@ def api_get(path, token=None):
         return json.load(r)
 
 
-def modrinth_slug_exists(slug):
-    """True if the project/slug is already taken (by anyone), False if free, None on transient error."""
+def resolve_modrinth_id(slug, token):
+    """Base62 project id for a slug (token so drafts resolve), or None if absent/error."""
     try:
-        api_get(f"/project/{slug}")
+        return api_get(f"/project/{slug}", token).get("id")
+    except Exception:
+        return None
+
+
+def modrinth_slug_exists(slug, token=None):
+    """True if the project/slug exists, False if free, None on transient error. Pass the owner token
+    so DRAFT/private projects (invisible to anonymous GET → 404) are seen as existing, not 'free'."""
+    try:
+        api_get(f"/project/{slug}", token)
         return True
     except urllib.error.HTTPError as e:
         if e.code == 404:
@@ -285,9 +294,10 @@ def write_listings(names, out_dir):
 
 
 # ── release-manifest wiring ────────────────────────────────────────────────────────────────────
-def wire_manifest(created_modrinth, cf_ids):
-    """Record slugs + resolved ids into release-manifest.json. Adds a project entry keyed by name if
-    absent; only fills the modrinth/curseforge blocks we have ids for (never clobbers existing)."""
+def wire_manifest(modrinth_ids, cf_ids):
+    """Record slugs + resolved ids into release-manifest.json. `modrinth_ids`/`cf_ids` are
+    {name: project_id}. Adds a project entry keyed by name if absent; only fills the modrinth/
+    curseforge blocks we have ids for (never clobbers existing)."""
     path = E.RELEASE_MANIFEST
     with open(path, encoding="utf-8") as f:
         manifest = json.load(f)
@@ -302,11 +312,11 @@ def wire_manifest(created_modrinth, cf_ids):
             entry = {"name": display_name[name]}
             mods.append(entry)
             by_name[display_name[name]] = entry
-        if name in created_modrinth and created_modrinth[name]:
+        if modrinth_ids.get(name):
             entry.setdefault("modrinth", {})
-            entry["modrinth"]["project_id"] = created_modrinth[name].get("id")
+            entry["modrinth"]["project_id"] = modrinth_ids[name]
             entry["modrinth"]["slug"] = spec["slug"]
-            changed.append(f"{name}.modrinth={created_modrinth[name].get('id')}")
+            changed.append(f"{name}.modrinth={modrinth_ids[name]}")
         if name in cf_ids:
             entry.setdefault("curseforge", {})
             entry["curseforge"]["project_id"] = cf_ids[name]
@@ -367,12 +377,14 @@ def main():
         if not (args.execute or args.verify or args.icons or args.wire_manifest or args.cf_checklist):
             return
 
-    # Manifest-only path: recording manual CF ids (no Modrinth call needed).
-    if cf_ids and args.wire_manifest and not (args.execute or args.verify or args.icons):
-        wire_manifest({}, cf_ids)
-        return
-
     token = load_token()
+
+    # Wire-only path: record ids into the manifest without the create/icon noise. Resolves the
+    # Modrinth id of each EXISTING project (token → drafts resolve) plus any manual --cf-id.
+    if args.wire_manifest and not (args.execute or args.verify or args.icons):
+        modrinth_ids = {n: resolve_modrinth_id(PROJECTS[n]["slug"], token) for n in names}
+        wire_manifest(modrinth_ids, cf_ids)
+        return
 
     if args.verify:
         try:
@@ -382,8 +394,8 @@ def main():
             sys.exit(f"[modrinth-verify] token invalid (need scopes 'Create projects' + 'Read user data'): {ex}")
         for n in names:
             slug = PROJECTS[n]["slug"]
-            exists = modrinth_slug_exists(slug)
-            state = {True: "TAKEN", False: "free", None: "unknown(error)"}[exists]
+            exists = modrinth_slug_exists(slug, token)
+            state = {True: "EXISTS", False: "free", None: "unknown(error)"}[exists]
             print(f"[modrinth-verify] slug '{slug}' — {state}")
         if args.cf_checklist:
             print_cf_checklist(names)
@@ -394,30 +406,26 @@ def main():
     icon_dry = not (args.execute or args.icons)
     mode = "CREATE (--execute)" if args.execute else ("ICONS (--icons)" if args.icons else "DRY-RUN")
     print(f"=== Modrinth {mode} ===")
-    created = {}
+    modrinth_ids = {}
     for n in names:
         spec = PROJECTS[n]
-        exists = modrinth_slug_exists(spec["slug"])
+        exists = modrinth_slug_exists(spec["slug"], token)
         project_id = None
         if exists is None:
             print(f"  [warn] could not check '{spec['slug']}' (transient) — skipping to be safe.")
             continue
         if exists is True:
             print(f"  [skip] '{spec['slug']}' already exists on Modrinth (idempotent).")
-            # Existing project: resolve its id so --icons can still refresh the avatar.
-            if args.icons or icon_dry:
-                try:
-                    project_id = api_get(f"/project/{spec['slug']}").get("id")
-                except Exception as ex:
-                    print(f"    [icon] cannot resolve id for '{spec['slug']}': {ex}")
+            project_id = resolve_modrinth_id(spec["slug"], token)
         elif args.icons:
             # --icons only refreshes EXISTING projects; a missing project must be created first.
             print(f"  [icons] '{spec['slug']}' not on Modrinth yet — run --execute first (nothing to icon).")
             continue
         else:
             resp = create_modrinth_project(spec, token, dry_run=not args.execute)
-            created[n] = resp
             project_id = (resp or {}).get("id") if resp else None
+        if project_id:
+            modrinth_ids[n] = project_id
 
         # Icon: after create OR when --icons refreshes an existing project. In a pure dry-run we still
         # preview it (project_id may be None if the project doesn't exist yet — skip the preview then).
@@ -431,8 +439,8 @@ def main():
         print_cf_checklist(names)
 
     if args.wire_manifest:
-        wire_manifest(created, cf_ids)
-    elif args.execute and any(created.values()):
+        wire_manifest(modrinth_ids, cf_ids)
+    elif args.execute and modrinth_ids:
         print("\n[hint] re-run with --wire-manifest (and --cf-id NAME=<id> once CF projects exist) "
               "to record ids into release-manifest.json.")
 
