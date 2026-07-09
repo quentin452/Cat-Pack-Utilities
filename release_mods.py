@@ -711,7 +711,7 @@ def verify_one(mod, skip_build, skip_boot):
     return ok
 
 
-def _capture_cf_file_id(mod, file_id):
+def _capture_cf_file_id(mod, file_id, log):
     """Write a freshly-uploaded CurseForge file id into the manifest's pack.cf_file_id, so the next
     pack_sync bumps the mod-director bundle to exactly this file (no manual copy — the id was lost
     to a print() before, 2026-07-09). Persists even if a later publish leg fails: the CF file is
@@ -969,7 +969,7 @@ def release_one(mod, execute, skip_build, changelog_override=None, force_cf=Fals
                 # bundle to it — closes the upload->manifest->pack_sync loop (no manual copy, nothing lost).
                 m_id = re.search(r"file id:\s*(\d+)", cf_out)
                 if m_id:
-                    _capture_cf_file_id(mod, int(m_id.group(1)))
+                    _capture_cf_file_id(mod, int(m_id.group(1)), log)
                 else:
                     log("⚠ could not parse CF file id from upload output — set pack.cf_file_id manually")
             else:
