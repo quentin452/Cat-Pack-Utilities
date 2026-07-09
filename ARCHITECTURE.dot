@@ -90,6 +90,7 @@ digraph arch {
   S_mixin_collision -> D_ART_HUB [style=dashed];
   S_mixin_collision -> D_ART_INSTANCE_TEST [style=dashed];
   S_mod_update_checker -> D_ART_SECRETS [style=dashed];
+  S_mod_update_checker -> D_ART_INSTANCE_TEST [style=dashed];
   S_modrinth_upload -> D_ART_SECRETS [style=dashed];
   S_pack_sync -> D_ART_SECRETS [style=dashed];
   S_pack_sync -> D_ART_HUB [style=dashed];
