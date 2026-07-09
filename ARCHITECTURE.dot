@@ -11,6 +11,7 @@ digraph arch {
   S_bundle_drift [label="bundle_drift.py", fillcolor="#1f6feb", fontcolor="white"];
   S_bundle_regression_gate [label="bundle_regression_gate.py", fillcolor="#1f6feb", fontcolor="white"];
   S_cascade_report [label="cascade_report.py", fillcolor="#1f6feb", fontcolor="white"];
+  S_census [label="census.py", fillcolor="#1f6feb", fontcolor="white"];
   S_cf_upload [label="cf_upload.py", fillcolor="#1f6feb", fontcolor="white"];
   S_changelog_from_bundles [label="changelog_from_bundles.py", fillcolor="#1f6feb", fontcolor="white"];
   S_changelog_from_git [label="changelog_from_git.py", fillcolor="#1f6feb", fontcolor="white"];

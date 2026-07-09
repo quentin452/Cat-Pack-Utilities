@@ -247,6 +247,16 @@
       "problemMatcher": []
     },
     {
+      "label": "Devtools: matoulib conversion-opportunity census (rank mods)",
+      "type": "shell",
+      "command": "python3 census.py",
+      "options": {
+        "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities"
+      },
+      "detail": "GET /census via matoulib RPC (game up, -Dmatoulib.rpc=true; works at the main menu, no world). Ranks pack mods by volume of content matoulib's data-driven systems could absorb (entities/fluids/blocks/items) + shows matoulib's own coverage vs the gap. Read-only. --json for raw, --top N to trim.",
+      "problemMatcher": []
+    },
+    {
       "label": "Pack: RELEASE dry-run (gates+plan)",
       "type": "shell",
       "command": "python3 release_pack.py --version ${input:packVersion} --baseline ${input:changelogBaseline}",
