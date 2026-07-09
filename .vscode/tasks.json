@@ -27,6 +27,24 @@
       "type": "promptString",
       "description": "Target mod name substring (from the pack) to de-risk on a fast minimal instance",
       "default": "manametalmod"
+    },
+    {
+      "id": "cfIdGigafauna",
+      "type": "promptString",
+      "description": "CurseForge numeric project id for gigafauna (created by hand at console.curseforge.com)",
+      "default": ""
+    },
+    {
+      "id": "cfIdMatoulib",
+      "type": "promptString",
+      "description": "CurseForge numeric project id for matoulib",
+      "default": ""
+    },
+    {
+      "id": "cfIdPack",
+      "type": "promptString",
+      "description": "CurseForge numeric project id for the Gigafauna modpack (slug gigafauna-pack)",
+      "default": ""
     }
   ],
   "tasks": [
@@ -66,6 +84,27 @@
       "type": "shell",
       "command": "python3 packenv.py --check",
       "detail": "Print every canonical path/id packenv resolves on THIS machine (\u2713/\u2717 = exists) + which secrets are set. Run after a machine move / renamed instance to confirm .env overrides land. Single source of truth for all pack tooling.",
+      "problemMatcher": []
+    },
+    {
+      "label": "Release: reserve slugs (dry-run + CF checklist) — SAFE",
+      "type": "shell",
+      "command": "python3 reserve_slugs.py --verify --cf-checklist",
+      "detail": "docs/26 clean-room: verify the MODRINTH_TOKEN + report which of gigafauna/matoulib/gigafauna-pack slugs are already TAKEN vs free on Modrinth, and print the manual CurseForge creation checklist (name/slug/type/category/license/summary). Read-only, no project is created. CF has no create-project API, so those are created by hand at console.curseforge.com.",
+      "problemMatcher": []
+    },
+    {
+      "label": "Release: reserve slugs on Modrinth (--execute) — OUTWARD",
+      "type": "shell",
+      "command": "python3 reserve_slugs.py --execute",
+      "detail": "OUTWARD: create the three Modrinth projects (gigafauna, matoulib, gigafauna-pack) as DRAFTS (slug claimed, not public). Idempotent — an already-taken slug is skipped. License MIT. Canonical copy lives in reserve_slugs.py PROJECTS. After this, create the CF projects by hand then run the wire task below.",
+      "problemMatcher": []
+    },
+    {
+      "label": "Release: wire reserved ids into release-manifest",
+      "type": "shell",
+      "command": "python3 reserve_slugs.py --wire-manifest --cf-id gigafauna=${input:cfIdGigafauna} --cf-id matoulib=${input:cfIdMatoulib} --cf-id pack=${input:cfIdPack}",
+      "detail": "After Modrinth drafts exist AND the CF projects were created by hand: record each Modrinth id + CF numeric project id into memory/release-manifest.json (never clobbers existing). Unblocks release_mods multi-platform publish + dist_parity parity checks.",
       "problemMatcher": []
     },
     {

@@ -33,6 +33,7 @@ digraph arch {
   S_release_log [label="release_log.py", fillcolor="#1f6feb", fontcolor="white"];
   S_release_mods [label="release_mods.py", fillcolor="#1f6feb", fontcolor="white"];
   S_release_pack [label="release_pack.py", fillcolor="#1f6feb", fontcolor="white"];
+  S_reserve_slugs [label="reserve_slugs.py", fillcolor="#1f6feb", fontcolor="white"];
   S_scan_repos [label="scan_repos.py", fillcolor="#1f6feb", fontcolor="white"];
   S_security_audit [label="security_audit.py", fillcolor="#1f6feb", fontcolor="white"];
   S_server_bootstrap_parity [label="server_bootstrap_parity.py", fillcolor="#1f6feb", fontcolor="white"];
@@ -116,6 +117,8 @@ digraph arch {
   S_release_pack -> D_ART_INSTANCE_TEST [style=dashed];
   S_release_pack -> D_ART_PACK_DIR [style=dashed];
   S_release_pack -> D_ART_RELEASE_MANIFEST [style=dashed];
+  S_reserve_slugs -> D_ART_SECRETS [style=dashed];
+  S_reserve_slugs -> D_ART_RELEASE_MANIFEST [style=dashed];
   S_scan_repos -> D_ART_HUB [style=dashed];
   S_scan_repos -> D_ART_RELEASE_MANIFEST [style=dashed];
   S_scan_repos -> D_ART_REPOS_JSON [style=dashed];
