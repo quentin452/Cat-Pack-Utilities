@@ -62,6 +62,20 @@
       "problemMatcher": []
     },
     {
+      "label": "Pack: server bootstrap parity (check) — PREFLIGHT",
+      "type": "shell",
+      "command": "python3 server_bootstrap_parity.py",
+      "detail": "GATE 8: the server launcher (lwjgl3ify forgePatches jar + 3startserver.sh/.bat) matches the bundle version, AND no client-only (side=CLIENT) mod sits on the server. Untracked by mod-director/pack_sync. Exit 2 on drift.",
+      "problemMatcher": []
+    },
+    {
+      "label": "Pack: server bootstrap parity (fix startscripts + drop stale jar)",
+      "type": "shell",
+      "command": "python3 server_bootstrap_parity.py --fix",
+      "detail": "Rewrite the startscript version tokens to the bundle version (byte-preserving: .sh=LF/.bat=CRLF) + drop stale forgePatches jars. Add --forgepatches-src <jar> to install the new bootstrap jar when absent (a binary can't be fabricated).",
+      "problemMatcher": []
+    },
+    {
       "label": "Pack: sync bundle fileIDs vs GitHub (audit)",
       "type": "shell",
       "command": "python3 pack_sync.py --audit",

@@ -497,6 +497,15 @@ def drift_gate(strict):
           "to hard-fail here.)")
 
 
+def bootstrap_gate():
+    """GATE 8 (2026-07-09): server_bootstrap_parity.py — a few bundle mods (lwjgl3ify) also have a
+    hardcoded server-side LAUNCHER (forgePatches jar + 3startserver.sh/.bat) that mod-director does
+    NOT sync from the bundle. Bump the bundle and the serverpack still boots the OLD forgePatches (or
+    fails jar-not-found) — a silent client<->server mismatch no other gate caught. This asserts the
+    canonical src/server bootstrap mirrors the bundle version. HARD-fails (exit 2) on drift."""
+    run([sys.executable, HERE / "server_bootstrap_parity.py"], "GATE 8 (server bootstrap parity)")
+
+
 def _run_gates(args, rl):
     """Run GATES 1–7 (the local audit) and record each to the release-log run `rl`. Behavior is
     UNCHANGED from the previous inline block: a hard-fail gate still sys.exit()s (the caller logs the
@@ -560,6 +569,11 @@ def _run_gates(args, rl):
     else:
         drift_gate(args.strict_drift)
         rl.gate("GATE 7 bundle-drift", True, "strict" if args.strict_drift else "report-only")
+
+    # GATE 8 — server bootstrap parity: the server launcher (forgePatches jar + startscripts) must
+    # mirror the bundle version (untracked by mod-director/update_local/pack_sync/config_sync)
+    bootstrap_gate()
+    rl.gate("GATE 8 server-bootstrap-parity", True)
 
 
 def main():
