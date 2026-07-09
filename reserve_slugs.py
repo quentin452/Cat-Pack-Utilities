@@ -264,6 +264,26 @@ def print_cf_checklist(names):
         print(f"    Summary  : {s['summary']}")
 
 
+# ── listing text dump (copy-paste onto CurseForge) ──────────────────────────────────────────────
+def write_listings(names, out_dir):
+    """Write each project's copy (title / summary / body markdown + CF fields) to a plain-text file
+    so it can be pasted into the CurseForge project form by hand. One file per project."""
+    os.makedirs(out_dir, exist_ok=True)
+    for name in names:
+        s = PROJECTS[name]
+        text = (
+            f"TITLE: {s['title']}\n"
+            f"SLUG: {s['slug']}\n"
+            f"TYPE: {s['cf_type']}    CATEGORY: {s['cf_category']}    LICENSE: {LICENSE_ID}\n"
+            f"\nSUMMARY:\n{s['summary']}\n"
+            f"\n--- DESCRIPTION (markdown) ---\n\n{s['body']}"
+        )
+        path = os.path.join(out_dir, f"{s['slug']}.txt")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+        print(f"[listing] wrote {path}")
+
+
 # ── release-manifest wiring ────────────────────────────────────────────────────────────────────
 def wire_manifest(created_modrinth, cf_ids):
     """Record slugs + resolved ids into release-manifest.json. Adds a project entry keyed by name if
@@ -327,6 +347,8 @@ def main():
                     help="upload/refresh the Modrinth icon of EXISTING projects (outward, no create)")
     ap.add_argument("--icon", action="append", metavar="NAME=PATH", default=[],
                     help="override the icon file for a project (default assets/brand/<slug>.png)")
+    ap.add_argument("--listings", nargs="?", const=os.path.join(SCRIPT_DIR, "assets", "listing"),
+                    metavar="DIR", help="write each project's title/summary/body to a .txt for CF copy-paste")
     ap.add_argument("--only", action="append", help="restrict to one project name (repeatable)")
     args = ap.parse_args()
 
@@ -338,6 +360,12 @@ def main():
             sys.exit(f"unknown project '{n}' (known: {', '.join(PROJECTS)})")
 
     cf_ids = parse_cf_ids(args.cf_id)
+
+    # Listing dump — offline, no token needed. If it's the only action, do it and stop.
+    if args.listings is not None:
+        write_listings(names, args.listings)
+        if not (args.execute or args.verify or args.icons or args.wire_manifest or args.cf_checklist):
+            return
 
     # Manifest-only path: recording manual CF ids (no Modrinth call needed).
     if cf_ids and args.wire_manifest and not (args.execute or args.verify or args.icons):
@@ -382,6 +410,10 @@ def main():
                     project_id = api_get(f"/project/{spec['slug']}").get("id")
                 except Exception as ex:
                     print(f"    [icon] cannot resolve id for '{spec['slug']}': {ex}")
+        elif args.icons:
+            # --icons only refreshes EXISTING projects; a missing project must be created first.
+            print(f"  [icons] '{spec['slug']}' not on Modrinth yet — run --execute first (nothing to icon).")
+            continue
         else:
             resp = create_modrinth_project(spec, token, dry_run=not args.execute)
             created[n] = resp

@@ -108,6 +108,13 @@
       "problemMatcher": []
     },
     {
+      "label": "Release: dump listing text (CF copy-paste)",
+      "type": "shell",
+      "command": "python3 reserve_slugs.py --listings",
+      "detail": "docs/26 clean-room: write each project's title/summary/body markdown + CF fields to assets/listing/<slug>.txt so the description can be pasted into the CurseForge project form by hand. Offline, no token, creates nothing.",
+      "problemMatcher": []
+    },
+    {
       "label": "Release: refresh Modrinth icons (--icons) — OUTWARD",
       "type": "shell",
       "command": "python3 reserve_slugs.py --icons",
