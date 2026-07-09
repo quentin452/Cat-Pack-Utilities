@@ -23,23 +23,13 @@ import sys
 import urllib.request
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+import packenv as E  # noqa: E402 — single source for secrets/paths
 CF_HOST = "https://minecraft.curseforge.com"
 DEFAULT_GAME_VERSION = "1.7.10"
 
 
 def load_token():
-    for name in (".env", ".env.local"):
-        path = os.path.join(SCRIPT_DIR, name)
-        if not os.path.isfile(path):
-            continue
-        for line in open(path):
-            line = line.strip()
-            if line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            if k.strip() == "CF_UPLOAD_TOKEN":
-                os.environ.setdefault("CF_UPLOAD_TOKEN", v.strip().strip("'\""))
-    tok = os.environ.get("CF_UPLOAD_TOKEN")
+    tok = E.cf_upload_token()   # packenv = single source (process env > .env.local > .env)
     if not tok:
         sys.exit("CF_UPLOAD_TOKEN absent — add it to Cat-Pack-Utilities/.env.local "
                  "(generate at https://authors-old.curseforge.com/account/api-tokens).")
@@ -56,18 +46,7 @@ def api_get(path, token):
 
 def read_api_key():
     """Optional CF_API_KEY (read API) for verifying a project exists — not the upload token."""
-    for name in (".env", ".env.local"):
-        path = os.path.join(SCRIPT_DIR, name)
-        if not os.path.isfile(path):
-            continue
-        for line in open(path):
-            line = line.strip()
-            if line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            if k.strip() == "CF_API_KEY":
-                return v.strip().strip("'\"")
-    return os.environ.get("CF_API_KEY")
+    return E.cf_api_key()   # packenv = single source
 
 
 def find_existing_file(project_id, display_name, file_basename, key):

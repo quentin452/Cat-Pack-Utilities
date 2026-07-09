@@ -21,6 +21,7 @@ import sys
 import urllib.request
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+import packenv as E  # noqa: E402 — single source for secrets/paths
 API = "https://api.modrinth.com/v2"
 DEFAULT_GAME_VERSION = "1.7.10"
 DEFAULT_LOADER = "forge"
@@ -38,18 +39,7 @@ def normalize_modrinth_version(version, version_format="strip-v"):
 
 
 def load_token():
-    for name in (".env", ".env.local"):
-        path = os.path.join(SCRIPT_DIR, name)
-        if not os.path.isfile(path):
-            continue
-        for line in open(path):
-            line = line.strip()
-            if line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            if k.strip() == "MODRINTH_TOKEN":
-                os.environ.setdefault("MODRINTH_TOKEN", v.strip().strip("'\""))
-    tok = os.environ.get("MODRINTH_TOKEN")
+    tok = E.modrinth_token()   # packenv = single source (process env > .env.local > .env)
     if not tok:
         sys.exit("MODRINTH_TOKEN absent — add it to .env.local "
                  "(create at https://modrinth.com/settings/pats, scope: create versions).")

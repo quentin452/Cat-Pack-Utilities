@@ -31,6 +31,8 @@ import urllib.error
 import urllib.request
 import zipfile
 
+import packenv as E  # single source for secrets/paths
+
 CF_API = "https://api.curseforge.com"
 MODRINTH_API = "https://api.modrinth.com/v2"
 GH_URL_RE = re.compile(r"github\.com/([^/]+)/([^/]+)/releases/download/([^/]+)/([^/?]+)")
@@ -50,7 +52,11 @@ def load_dotenv():
                 continue
             k, v = line.split("=", 1)
             conf[k.strip()] = v.strip().strip("'\"")
-    conf.update({k: v for k, v in os.environ.items() if k in ("INSTANCE_PATH", "CF_API_KEY")})
+    # CF_API_KEY + INSTANCE_PATH via packenv (single source: process env > .env.local > .env),
+    # so this checker resolves them the SAME way as the rest of the tooling.
+    if E.cf_api_key():
+        conf["CF_API_KEY"] = E.cf_api_key()
+    conf["INSTANCE_PATH"] = E.INSTANCE_TEST
     return conf
 
 
