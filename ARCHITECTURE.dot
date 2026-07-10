@@ -22,6 +22,7 @@ digraph arch {
   S_gen_placeholder_logos [label="gen_placeholder_logos.py", fillcolor="#1f6feb", fontcolor="white"];
   S_housekeep [label="housekeep.py", fillcolor="#1f6feb", fontcolor="white"];
   S_make_minimal_instance [label="make_minimal_instance.py", fillcolor="#1f6feb", fontcolor="white"];
+  S_matoulib_arch [label="matoulib_arch.py", fillcolor="#1f6feb", fontcolor="white"];
   S_mixin_collision [label="mixin_collision.py", fillcolor="#1f6feb", fontcolor="white"];
   S_mod_update_checker [label="mod_update_checker.py", fillcolor="#1f6feb", fontcolor="white"];
   S_modrinth_upload [label="modrinth_upload.py", fillcolor="#1f6feb", fontcolor="white"];
@@ -99,6 +100,7 @@ digraph arch {
   S_make_minimal_instance -> D_ART_HUB [style=dashed];
   S_make_minimal_instance -> D_ART_INSTANCE_TEST [style=dashed];
   S_make_minimal_instance -> D_ART_INSTANCES_ROOT [style=dashed];
+  S_matoulib_arch -> D_ART_HUB [style=dashed];
   S_mixin_collision -> D_ART_HUB [style=dashed];
   S_mixin_collision -> D_ART_INSTANCE_TEST [style=dashed];
   S_mod_update_checker -> D_ART_SECRETS [style=dashed];
