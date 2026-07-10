@@ -70,6 +70,13 @@
       "type": "promptString",
       "description": "A/B candidate artifact label (the ON capture)",
       "default": "C0-ON"
+    },
+    {
+      "id": "benchPhosphor",
+      "type": "pickString",
+      "description": "ArchaicFix Phosphor state that is BOOTED (must match ArchaicConfig.enablePhosphor) — light metric only",
+      "options": ["off", "on"],
+      "default": "off"
     }
   ],
   "tasks": [
@@ -443,6 +450,26 @@
         "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities"
       },
       "detail": "A/B two frozen chunk-gen artifacts: reports the ms/chunk delta WITH the run-to-run spread — a delta inside the combined noise band is called INCONCLUSIVE, not a win (kills the noisy single-shot A/B). Also checks the /worldgen/fingerprint hashes: a mismatch = the async path changed generated blocks = HARD gate FAIL (exit 3), independent of any speedup.",
+      "problemMatcher": []
+    },
+    {
+      "label": "Bench: light capture",
+      "type": "shell",
+      "command": "python3 chunkgen_bench.py capture --metric light --flag ${input:benchFlag} --phosphor ${input:benchPhosphor} --label ${input:benchLabel}",
+      "options": {
+        "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities"
+      },
+      "detail": "C2 async-light A/B (hub docs/45), same rigor skeleton as the chunk-gen bench: drives /worldgen/lightperf (relight ADD/REMOVE us over N deterministic origins, drop warmup) + /metrics tick-health sampled under load + /worldgen/lightfingerprint sky/block-nibble bit-identity, writes a frozen artifact to memory/bench-captures/. IDLE-GUARD same as chunk. Cross-checks --flag against /metrics.asyncLight (the EFFECTIVE C2 state) AND --phosphor against the 'phosphor' field ArchaicFix stamps into lightperf — fails loudly on either mismatch. Boot ONE matoulib-RPC instance in-world with the matching -Dmatoulib.chunk.asyncLight (requires master -Dmatoulib.chunk.pipeline=true) and ArchaicConfig.enablePhosphor FIRST (single-instance rule).",
+      "problemMatcher": []
+    },
+    {
+      "label": "Bench: light A/B compare",
+      "type": "shell",
+      "command": "python3 chunkgen_bench.py compare ${input:benchBaseline} ${input:benchCandidate}",
+      "options": {
+        "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities"
+      },
+      "detail": "A/B two frozen light-perf artifacts (must both be --metric light captures, else it refuses): reports the relight ADD-us and REMOVE-us deltas WITH the run-to-run spread — a delta inside the combined noise band is INCONCLUSIVE, not a win. Also checks the /worldgen/lightfingerprint sky+block hashes: a mismatch = the async-light path changed lit nibbles = HARD gate FAIL (exit 3), independent of any speedup. Same command as the chunk compare task — it auto-detects the metric from the artifact.",
       "problemMatcher": []
     }
   ]

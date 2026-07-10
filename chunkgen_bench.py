@@ -23,6 +23,14 @@ Existing endpoints cover all three axes, so NO new measurement endpoint was need
   /metrics             -> meanTickMs, tps, heap, and (added for this harness) chunkPipeline flag state
   /worldgen/fingerprint-> deterministic FNV-1a block-state hash for the serial==parallel gate
 
+--metric light (C2, docs/45) A/Bs the async-light flag with the SAME skeleton, swapped endpoints:
+  /worldgen/lightperf       -> relight ADD/REMOVE avg us (the cost genprofile/Timers do NOT capture,
+                               since 1.7.10 light propagation is deferred off the gen path)
+  /metrics                  -> same tick-health axis, plus (C2) the EFFECTIVE asyncLight flag state
+  /worldgen/lightfingerprint-> deterministic FNV-1a sky+block nibble hash for the light bit-identity gate
+  A second label axis, --phosphor {on,off}, is cross-checked against the "phosphor" field ArchaicFix
+  stamps into /worldgen/lightperf, so the 4-way matrix (asyncOFF/ON x phosphorOFF/ON) stays distinct.
+
 Single-instance rule: this script NEVER boots/kills the game. Boot ONE matoulib-RPC instance
 (-Dmatoulib.rpc=true) with the pipeline flag set the way you are capturing, get in-world, THEN run.
 
@@ -33,6 +41,11 @@ Usage:
   python3 chunkgen_bench.py capture --flag on  --label C0-ON
   # 3. A/B the two frozen artifacts (delta WITH spread; inconclusive-if-within-noise):
   python3 chunkgen_bench.py compare C0-OFF C0-ON
+
+  # C2 async-light axis (2 flags x 2 phosphor states = 4 captures, compare pairwise):
+  python3 chunkgen_bench.py capture --metric light --flag off --phosphor off --label C2-asyncOFF-phosOFF
+  python3 chunkgen_bench.py capture --metric light --flag on  --phosphor off --label C2-asyncON-phosOFF
+  python3 chunkgen_bench.py compare C2-asyncOFF-phosOFF C2-asyncON-phosOFF
 """
 import argparse
 import json
@@ -228,11 +241,16 @@ def capture(args):
     if not wait_in_world(rpc_base, args.boot_wait):
         sys.exit("not in-world — boot the matoulib-RPC instance first (devtools skill), then retry.")
 
-    # 1. idle guard
+    # 1. idle guard (shared by both metrics)
     ok, guard = idle_guard(args.cpu_threshold, args.gpu_threshold, args.force)
     if not ok and not args.force:
         sys.exit(2)
 
+    if args.metric == "light":
+        capture_light(args, rpc_base, guard)
+        return
+
+    # metric == "chunk" (default): UNCHANGED below — existing callers/tasks keep working as-is.
     # 2. flag-label integrity: the booted flag MUST match what we claim to capture
     metrics0 = rpc(rpc_base, "/metrics", timeout=30)
     booted = metrics0.get("chunkPipeline")
@@ -403,6 +421,204 @@ def _write_markdown(path, a):
         fh.write("\n".join(lines))
 
 
+# ── capture (light, C2 async-light A/B) ─────────────────────────────────────────────────────────────
+
+
+def capture_light(args, rpc_base, guard):
+    """--metric light: same skeleton as capture() (idle-guard already done by the caller, paired
+    deterministic origins, median/p95/spread, hard-gate fingerprint) but drives /worldgen/lightperf
+    (relight ADD/REMOVE us) instead of /worldgen/genprofile, and /worldgen/lightfingerprint (sky+block
+    nibble hash) instead of /worldgen/fingerprint as the bit-identity gate. Second label axis
+    --phosphor is cross-checked against the "phosphor" field ArchaicFix stamps into lightperf."""
+    if args.phosphor is None:
+        sys.exit("--phosphor {on,off} is required when --metric light "
+                 "(labels which ArchaicFix Phosphor state is booted, cross-checked against lightperf).")
+    declared_async = args.flag == "on"
+    declared_phosphor = args.phosphor == "on"
+
+    # 2a. async-light flag-label integrity (mirrors the chunkPipeline check, field is /metrics.asyncLight
+    # — the EFFECTIVE C2 state: ChunkPipeline.ASYNC_LIGHT is forced off without the master pipeline flag).
+    metrics0 = rpc(rpc_base, "/metrics", timeout=30)
+    booted_async = metrics0.get("asyncLight")
+    if booted_async is None:
+        print("  WARN: /metrics has no asyncLight field (matoulib not rebuilt with the C2 readout);"
+              " labelling from --flag only, cannot verify.")
+    elif booted_async != declared_async and not args.no_flag_check:
+        sys.exit(f"FLAG MISMATCH: booted asyncLight={booted_async} but --flag {args.flag} "
+                 f"(declared={declared_async}). You are about to mislabel a capture. Reboot with the "
+                 f"right -Dmatoulib.chunk.asyncLight, or pass --no-flag-check.")
+    else:
+        print(f"  flag verified: booted asyncLight={booted_async} == declared {args.flag}")
+
+    # 2b. phosphor-label integrity: a cheap probe call (endpoint restores blocks, side-effect free).
+    probe = rpc(rpc_base, "/worldgen/lightperf",
+                {"x": args.anchor_x, "z": args.anchor_z, "r": 0, "n": 1, "dim": args.dim})
+    if not probe.get("ok"):
+        sys.exit(f"lightperf probe failed: {probe}")
+    booted_phosphor = probe.get("phosphor")
+    if booted_phosphor == "unavailable":
+        print("  WARN: ArchaicFix ArchaicConfig.enablePhosphor not reachable via reflection; labelling"
+              " from --phosphor only, cannot verify.")
+    elif booted_phosphor != declared_phosphor and not args.no_flag_check:
+        sys.exit(f"PHOSPHOR MISMATCH: booted phosphor={booted_phosphor} but --phosphor {args.phosphor} "
+                 f"(declared={declared_phosphor}). You are about to mislabel a capture. Reboot with the "
+                 f"right ArchaicConfig.enablePhosphor, or pass --no-flag-check.")
+    else:
+        print(f"  phosphor verified: booted phosphor={booted_phosphor} == declared {args.phosphor}")
+
+    # Same deterministic origins as --metric chunk (reproducible, paired A/B).
+    org = origins(args.anchor_x, args.anchor_z, args.stride, args.runs)
+    print(f"\n  light-perf sweep: {args.runs} runs (drop {args.warmup} warmup), "
+          f"light-r={args.light_r} n={args.light_n}, dim={args.dim}")
+    print(f"  origins: {org[0]} .. {org[-1]}  stride={args.stride} blocks (same origins as --metric chunk)")
+
+    sampler = TickSampler(rpc_base, args.tick_interval)
+    sampler.start()
+    per_run = []
+    for k, (x, z) in enumerate(org):
+        r = rpc(rpc_base, "/worldgen/lightperf",
+                {"x": x, "z": z, "r": args.light_r, "n": args.light_n, "dim": args.dim})
+        if not r.get("ok"):
+            sampler.stop()
+            sys.exit(f"lightperf failed at run {k} ({x},{z}): {r}")
+        row = {
+            "run": k, "x": x, "z": z, "warmup": k < args.warmup,
+            "edits": int(r["edits"]), "phosphor": r.get("phosphor"),
+            "addAvgUs": float(r["addAvgUs"]), "removeAvgUs": float(r["removeAvgUs"]),
+            "addTotalMs": float(r["addTotalMs"]), "removeTotalMs": float(r["removeTotalMs"]),
+        }
+        per_run.append(row)
+        tag = "  (warmup, dropped)" if row["warmup"] else ""
+        print(f"    run {k}: {row['edits']} edits  add {row['addAvgUs']:.1f} us  "
+              f"remove {row['removeAvgUs']:.1f} us  phosphor={row['phosphor']}{tag}")
+    sampler.stop()
+    sampler.join(timeout=5)
+
+    measured = [r for r in per_run if not r["warmup"]]
+    if not measured:
+        sys.exit("no measured runs after dropping warmup — increase --runs.")
+
+    add_series = [r["addAvgUs"] for r in measured]
+    remove_series = [r["removeAvgUs"] for r in measured]
+    tick_series = [s["meanTickMs"] for s in sampler.samples if s["meanTickMs"] >= 0]
+    tps_series = [s["tps"] for s in sampler.samples if s["tps"] >= 0]
+
+    # bit-identity light fingerprint (C2 gate: async OFF vs ON MUST produce identical sky/block nibbles)
+    fp = rpc(rpc_base, "/worldgen/lightfingerprint",
+             {"x": args.fp_x, "z": args.fp_z, "radius": args.fp_r, "dim": args.dim})
+
+    light = {
+        "median_add_us": median(add_series), "p95_add_us": percentile(add_series, 0.95),
+        "spread_add_us": spread(add_series),
+        "median_remove_us": median(remove_series), "p95_remove_us": percentile(remove_series, 0.95),
+        "spread_remove_us": spread(remove_series),
+        "per_run": per_run,
+    }
+    tick_health = {
+        "n_samples": len(tick_series),
+        "median_mean_tick_ms": median(tick_series),
+        "p95_mean_tick_ms": percentile(tick_series, 0.95),
+        "min_tps": (min(tps_series) if tps_series else None),
+        "median_tps": median(tps_series),
+    }
+    artifact = {
+        "schema": "chunkgen-bench/1",
+        "metric": "light",
+        "label": args.label,
+        "flag": args.flag,
+        "asyncLight_booted": booted_async,
+        "phosphor": args.phosphor,
+        "phosphor_booted": booted_phosphor,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "host": os.uname().nodename,
+        "rpc": rpc_base,
+        "seed_note": args.seed_note,
+        "dim": args.dim,
+        "workload": {
+            "anchor": [args.anchor_x, args.anchor_z], "stride": args.stride,
+            "light_r": args.light_r, "light_n": args.light_n,
+            "runs": args.runs, "warmup": args.warmup,
+        },
+        "idle_guard": guard,
+        "light": light,
+        "tick_health": tick_health,
+        # "hash" is the generic bit-identity field compare() gates on for BOTH metrics; combinedHash
+        # folds sky+block together, sky/blockHash kept alongside so a mismatch can be localised.
+        "fingerprint": {
+            "x": args.fp_x, "z": args.fp_z, "radius": args.fp_r,
+            "hash": fp.get("combinedHash"), "skyHash": fp.get("skyHash"), "blockHash": fp.get("blockHash"),
+            "chunks": fp.get("chunks"), "sections": fp.get("sections"), "hasSky": fp.get("hasSky"),
+        },
+    }
+
+    os.makedirs(E.BENCH_CAPTURES, exist_ok=True)
+    stem = os.path.join(E.BENCH_CAPTURES, args.label)
+    with open(stem + ".json", "w", encoding="utf-8") as fh:
+        json.dump(artifact, fh, indent=2)
+        fh.write("\n")
+    _write_markdown_light(stem + ".md", artifact)
+
+    print(f"\n  === {args.label} (async={args.flag}, phosphor={args.phosphor}) ===")
+    print(f"  relight ADD   : median {light['median_add_us']:.1f} us  "
+          f"(p95 {light['p95_add_us']:.1f}, spread ±{light['spread_add_us']:.1f})")
+    print(f"  relight REMOVE: median {light['median_remove_us']:.1f} us  "
+          f"(p95 {light['p95_remove_us']:.1f}, spread ±{light['spread_remove_us']:.1f})")
+    print(f"  tick-health   : median {_fmt(tick_health['median_mean_tick_ms'])} ms/tick  "
+          f"min TPS {_fmt(tick_health['min_tps'])}  ({tick_health['n_samples']} samples under load)")
+    print(f"  light fingerprint: {artifact['fingerprint']['hash']}  "
+          f"(sky {artifact['fingerprint']['skyHash']} / block {artifact['fingerprint']['blockHash']}, "
+          f"{artifact['fingerprint']['chunks']} chunks)")
+    print(f"  written: {stem}.json  +  {stem}.md")
+
+
+def _write_markdown_light(path, a):
+    l, th = a["light"], a["tick_health"]
+    fp = a["fingerprint"]
+    w = a["workload"]
+    lines = [
+        f"# light-perf baseline — {a['label']} (async {a['flag']}, phosphor {a['phosphor']})",
+        "",
+        f"- captured: {a['timestamp']}  host: {a['host']}",
+        f"- booted asyncLight: `{a['asyncLight_booted']}`   booted phosphor: `{a['phosphor_booted']}`   "
+        f"seed: {a['seed_note']}   dim: {a['dim']}",
+        f"- workload: anchor {w['anchor']} stride {w['stride']} light-r{w['light_r']} n{w['light_n']} — "
+        f"{w['runs']} runs, drop {w['warmup']} warmup",
+        f"- idle-guard: cpu `{a['idle_guard']['cpu']}` gpu `{a['idle_guard']['gpu']}`"
+        + ("  **(OVERRIDDEN via --force)**" if a["idle_guard"].get("overridden") else ""),
+        "",
+        "## Relight perf (add = light spread, remove = darkening — the harder, more expensive case)",
+        "",
+        f"- **ADD    median {l['median_add_us']:.1f} us** (p95 {l['p95_add_us']:.1f}, "
+        f"spread ±{l['spread_add_us']:.1f})",
+        f"- **REMOVE median {l['median_remove_us']:.1f} us** (p95 {l['p95_remove_us']:.1f}, "
+        f"spread ±{l['spread_remove_us']:.1f})",
+        "",
+        "| run | x,z | edits | add us | remove us | phosphor | warmup |",
+        "|----:|-----|------:|-------:|----------:|:--------:|:------:|",
+    ]
+    for r in l["per_run"]:
+        lines.append(f"| {r['run']} | {r['x']},{r['z']} | {r['edits']} | "
+                     f"{r['addAvgUs']:.1f} | {r['removeAvgUs']:.1f} | {r['phosphor']} | "
+                     f"{'yes' if r['warmup'] else ''} |")
+    lines += [
+        "",
+        "## Tick-health (sampled under gen load)",
+        "",
+        f"- median {_fmt(th['median_mean_tick_ms'])} ms/tick (p95 {_fmt(th['p95_mean_tick_ms'])}), "
+        f"min TPS {_fmt(th['min_tps'])}, median TPS {_fmt(th['median_tps'])} — {th['n_samples']} samples",
+        "",
+        "## Light fingerprint (C2 bit-identity gate: async OFF vs ON must be equal)",
+        "",
+        f"- `{fp['hash']}` (sky `{fp['skyHash']}` / block `{fp['blockHash']}`, {fp['chunks']} chunks, "
+        f"{fp['sections']} sections, hasSky={fp['hasSky']}) @ ({fp['x']},{fp['z']}) radius{fp['radius']}",
+        "",
+        "> Frozen reference. A/B against this via `chunkgen_bench.py compare` (same --metric only).",
+        "",
+    ]
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines))
+
+
 # ── compare ──────────────────────────────────────────────────────────────────────────────────────
 
 
@@ -417,6 +633,19 @@ def _load(label):
 def compare(args):
     base = _load(args.baseline)   # OFF (reference)
     cand = _load(args.candidate)  # ON
+    # metric is absent on pre-existing chunk artifacts -> defaults to "chunk" (backward compatible).
+    base_metric = base.get("metric", "chunk")
+    cand_metric = cand.get("metric", "chunk")
+    if base_metric != cand_metric:
+        sys.exit(f"metric mismatch: baseline is --metric {base_metric}, candidate is --metric "
+                 f"{cand_metric} — compare artifacts captured with the SAME --metric only.")
+    if base_metric == "light":
+        _compare_light(base, cand)
+    else:
+        _compare_chunk(base, cand)
+
+
+def _compare_chunk(base, cand):
     bt, ct = base["throughput"], cand["throughput"]
 
     b_mpc, c_mpc = bt["median_ms_per_chunk"], ct["median_ms_per_chunk"]
@@ -469,6 +698,62 @@ def compare(args):
         sys.exit(3)  # gate failure is a non-zero exit for CI/preflight use
 
 
+def _compare_axis(name, unit, b_med, c_med, b_spread, c_spread):
+    """Same delta-WITH-noise-band logic as the chunk throughput axis, parameterised over unit/label so
+    the ADD and REMOVE relight-us axes both get it without duplicating the inconclusive/speedup/regression
+    wording."""
+    band = ((b_spread or 0.0) + (c_spread or 0.0)) / 2.0
+    delta = c_med - b_med
+    pct = (100.0 * delta / b_med) if b_med else 0.0
+    conclusive = abs(delta) > band
+    print(f"\n  {name} ({unit}, lower=better)")
+    print(f"    baseline : {b_med:.1f}   spread ±{b_spread:.1f}")
+    print(f"    candidate: {c_med:.1f}   spread ±{c_spread:.1f}")
+    print(f"    delta    : {delta:+.1f} {unit} ({pct:+.1f}%)   noise band ±{band:.1f}")
+    if not conclusive:
+        print(f"    -> INCONCLUSIVE: |delta| {abs(delta):.1f} <= noise band {band:.1f}. NOT a win/regression;"
+              " re-run with more --runs on a quieter machine to shrink the band.")
+    elif delta < 0:
+        print(f"    -> SPEEDUP: candidate is {-pct:.1f}% faster, outside the noise band.")
+    else:
+        print(f"    -> REGRESSION: candidate is {pct:.1f}% slower, outside the noise band.")
+
+
+def _compare_light(base, cand):
+    bl, cl = base["light"], cand["light"]
+
+    print("=" * 74)
+    print(f"  light-perf A/B   baseline {base['label']} (flag {base['flag']}, phosphor {base.get('phosphor')})"
+          f"  vs  candidate {cand['label']} (flag {cand['flag']}, phosphor {cand.get('phosphor')})")
+    print("=" * 74)
+
+    _compare_axis("RELIGHT ADD", "us", bl["median_add_us"], cl["median_add_us"],
+                  bl["spread_add_us"], cl["spread_add_us"])
+    _compare_axis("RELIGHT REMOVE", "us", bl["median_remove_us"], cl["median_remove_us"],
+                  bl["spread_remove_us"], cl["spread_remove_us"])
+
+    bth, cth = base["tick_health"], cand["tick_health"]
+    print(f"\n  TICK-HEALTH (ms/tick under load, lower=better):")
+    print(f"    baseline {_fmt(bth['median_mean_tick_ms'])}  candidate {_fmt(cth['median_mean_tick_ms'])}  "
+          f"| min TPS {_fmt(bth['min_tps'])} -> {_fmt(cth['min_tps'])}")
+
+    bh, ch = base["fingerprint"]["hash"], cand["fingerprint"]["hash"]
+    print(f"\n  LIGHT FINGERPRINT (C2 bit-identity gate: sky+block nibbles, async OFF vs ON):")
+    print(f"    baseline  {bh}")
+    print(f"    candidate {ch}")
+    identical = bh is not None and bh == ch
+    print(f"    -> {'PASS: bit-identical (light nibbles unchanged).' if identical else 'FAIL: HASH MISMATCH — the async-light path changed sky/block nibbles. This is a HARD gate; fix before trusting any speedup.'}")
+
+    for a in (base, cand):
+        if a.get("phosphor_booted") == "unavailable":
+            print(f"\n  WARNING: {a['label']} could not verify phosphor state (ArchaicConfig reflection "
+                  f"unavailable at capture time) — its phosphor label is unverified.")
+
+    print()
+    if not identical:
+        sys.exit(3)  # gate failure is a non-zero exit for CI/preflight use
+
+
 # ── cli ──────────────────────────────────────────────────────────────────────────────────────────
 
 
@@ -478,8 +763,19 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     cap = sub.add_parser("capture", help="run the benchmark, write a frozen baseline artifact")
+    cap.add_argument("--metric", choices=("chunk", "light"), default="chunk",
+                     help="axis to capture: chunk-gen throughput via genprofile/fingerprint (default, "
+                          "UNCHANGED) or C2 async-light relight perf via lightperf/lightfingerprint")
     cap.add_argument("--flag", choices=("off", "on"), required=True,
-                     help="which pipeline flag state is BOOTED (must match /metrics chunkPipeline)")
+                     help="which flag state is BOOTED — cross-checked against /metrics.chunkPipeline "
+                          "for --metric chunk, or /metrics.asyncLight for --metric light")
+    cap.add_argument("--phosphor", choices=("on", "off"), default=None,
+                     help="ArchaicFix Phosphor state that is BOOTED (required for --metric light; "
+                          "cross-checked against the 'phosphor' field in /worldgen/lightperf)")
+    cap.add_argument("--light-r", type=int, default=3, dest="light_r",
+                     help="--metric light only: lightperf region radius in chunks")
+    cap.add_argument("--light-n", type=int, default=64, dest="light_n",
+                     help="--metric light only: lightperf edit points per probe")
     cap.add_argument("--label", required=True, help="artifact name (e.g. C0-OFF)")
     cap.add_argument("--rpc", default=DEFAULT_RPC)
     cap.add_argument("--dim", type=int, default=0)
@@ -508,7 +804,8 @@ def main():
                      help="skip the booted-flag vs --flag integrity check")
     cap.set_defaults(func=capture)
 
-    cmp = sub.add_parser("compare", help="A/B two artifacts: delta WITH spread, inconclusive-if-in-noise")
+    cmp = sub.add_parser("compare", help="A/B two artifacts (same --metric): delta WITH spread, "
+                                          "inconclusive-if-in-noise, hard-fail on fingerprint mismatch")
     cmp.add_argument("baseline", help="reference artifact label or path (usually the OFF capture)")
     cmp.add_argument("candidate", help="candidate artifact label or path (the ON capture)")
     cmp.set_defaults(func=compare)
