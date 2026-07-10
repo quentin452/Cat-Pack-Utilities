@@ -15,6 +15,7 @@ digraph arch {
   S_cf_upload [label="cf_upload.py", fillcolor="#1f6feb", fontcolor="white"];
   S_changelog_from_bundles [label="changelog_from_bundles.py", fillcolor="#1f6feb", fontcolor="white"];
   S_changelog_from_git [label="changelog_from_git.py", fillcolor="#1f6feb", fontcolor="white"];
+  S_chunkgen_bench [label="chunkgen_bench.py", fillcolor="#1f6feb", fontcolor="white"];
   S_config_sync [label="config_sync.py", fillcolor="#1f6feb", fontcolor="white"];
   S_dist_parity [label="dist_parity.py", fillcolor="#1f6feb", fontcolor="white"];
   S_gen_placeholder_logos [label="gen_placeholder_logos.py", fillcolor="#1f6feb", fontcolor="white"];
@@ -52,6 +53,7 @@ digraph arch {
   D_ART_INSTANCES_ROOT [label="instances root dir", shape=cylinder, fillcolor="#f2cc60"];
   D_ART_MODRINTH_BUNDLE [label="modrinth.bundle.json", shape=cylinder, fillcolor="#f2cc60"];
   D_ART_PACK_DIR [label="pack repo (PACK_DIR family)", shape=cylinder, fillcolor="#f2cc60"];
+  D_ART_OTHER_BENCH_CAPTURES [label="packenv.BENCH_CAPTURES (unclassified)", shape=cylinder, fillcolor="#f2cc60"];
   D_ART_RELEASE_MANIFEST [label="release-manifest.json", shape=cylinder, fillcolor="#f2cc60"];
   D_ART_REPOS_JSON [label="repos.json", shape=cylinder, fillcolor="#f2cc60"];
   D_ART_URL_BUNDLE [label="url.bundle.json", shape=cylinder, fillcolor="#f2cc60"];
@@ -81,6 +83,7 @@ digraph arch {
   S_changelog_from_bundles -> D_ART_PACK_DIR [style=dashed];
   S_changelog_from_bundles -> D_ART_URL_BUNDLE [style=dashed];
   S_changelog_from_git -> D_ART_REPOS_JSON [style=dashed];
+  S_chunkgen_bench -> D_ART_OTHER_BENCH_CAPTURES [style=dashed];
   S_config_sync -> D_ART_INSTANCE_SERVER [style=dashed];
   S_config_sync -> D_ART_INSTANCE_TEST [style=dashed];
   S_config_sync -> D_ART_PACK_DIR [style=dashed];
