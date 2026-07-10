@@ -25,7 +25,10 @@ import sys
 
 import packenv as E
 
-DEV_SUFFIXES = ("-dev.jar", "-sources.jar")
+# Non-deployable build variants. `-dev-preshadow.jar` is the pre-shadow intermediate (shadowImplementation
+# deps like matou-exec NOT yet merged) — deploying it yields NoClassDefFoundError at runtime, so it MUST be
+# excluded even though it doesn't end in "-dev.jar" (it ends in "-dev-preshadow.jar").
+DEV_SUFFIXES = ("-dev.jar", "-sources.jar", "-preshadow.jar")
 TEST_SUFFIX = "-test.jar"
 
 
