@@ -43,6 +43,59 @@ def slug(url):
     return u
 
 
+def candidate_dirs(root):
+    """Yield (abspath, rel) for every git repo to inventory: each top-level dir that IS a repo,
+    plus — for a top-level dir that is NOT itself a repo (a grouping folder like `matou/`) — its
+    immediate child dirs that are repos. `rel` is the path relative to root (e.g. "matou/gigafauna"),
+    so the stored path reflects the real location. One level of nesting only (enough to group repos
+    into a subfolder without hiding them from the inventory)."""
+    for name in sorted(os.listdir(root)):
+        path = os.path.join(root, name)
+        if not os.path.isdir(path):
+            continue
+        if os.path.isdir(os.path.join(path, ".git")):
+            yield path, name
+            continue
+        # Not a repo itself → treat as a grouping folder, scan its immediate children.
+        for sub in sorted(os.listdir(path)):
+            subpath = os.path.join(path, sub)
+            if os.path.isdir(subpath) and os.path.isdir(os.path.join(subpath, ".git")):
+                yield subpath, f"{name}/{sub}"
+
+
+def inspect(path, rel, manifest_repos):
+    """Build the inventory record for a repo dir, or None if not owned by us. `rel` = path relative
+    to GITHUB_ROOT (carries any grouping subfolder); `name` stays the repo basename (identity)."""
+    name = os.path.basename(rel)
+    origin = git(path, "remote", "get-url", "origin")
+    if not any(o in origin.lower() for o in OWNER_PAT):
+        return None
+    upstream = git(path, "remote", "get-url", "upstream")
+    is_fork = bool(upstream) or name in FORK_OVERRIDE
+    # A gradle build present (most 1.7.10 mods use RFG/Forge gradle) — necessary but NOT
+    # sufficient to be a MC mod (CatzEngine/binary-greedy-meshing have gradle but aren't mods).
+    is_gradle = os.path.exists(os.path.join(path, "build.gradle")) or \
+        os.path.exists(os.path.join(path, "build.gradle.kts")) or \
+        os.path.exists(os.path.join(path, "gradle.properties"))
+    # is_mod = ships an mcmod.info descriptor = the DEFINITIVE "this is a MC mod" marker. This
+    # is what changelog/release tracking must filter on — a fork that is not a mod (rendering
+    # engine, meshing lib) should never be flagged as an untracked pack mod. (BUG: track_audit
+    # used is_fork and false-flagged CatzEngine/binary-greedy-meshing — 2026-07-07.)
+    src = os.path.join(path, "src")
+    is_mod = os.path.isdir(src) and any("mcmod.info" in fns for _, _, fns in os.walk(src))
+    return {
+        "name": name,
+        "path": f"~/Documents/GitHub/{rel}",
+        "slug": slug(origin),
+        "upstream": slug(upstream) or FORK_OVERRIDE.get(name),
+        "is_fork": is_fork,
+        "branch": git(path, "branch", "--show-current"),
+        "gradle": is_gradle,
+        "is_mod": is_mod,
+        "in_release_manifest": name in manifest_repos,
+    }
+
+
 def main():
     manifest_repos = set()
     if os.path.exists(MANIFEST):
@@ -50,37 +103,11 @@ def main():
             manifest_repos.add(os.path.basename(os.path.expanduser(e.get("repo", "")).rstrip("/")))
 
     repos = []
-    for name in sorted(os.listdir(GITHUB_DIR)):
-        path = os.path.join(GITHUB_DIR, name)
-        if not os.path.isdir(os.path.join(path, ".git")):
-            continue
-        origin = git(path, "remote", "get-url", "origin")
-        if not any(o in origin.lower() for o in OWNER_PAT):
-            continue
-        upstream = git(path, "remote", "get-url", "upstream")
-        is_fork = bool(upstream) or name in FORK_OVERRIDE
-        # A gradle build present (most 1.7.10 mods use RFG/Forge gradle) — necessary but NOT
-        # sufficient to be a MC mod (CatzEngine/binary-greedy-meshing have gradle but aren't mods).
-        is_gradle = os.path.exists(os.path.join(path, "build.gradle")) or \
-            os.path.exists(os.path.join(path, "build.gradle.kts")) or \
-            os.path.exists(os.path.join(path, "gradle.properties"))
-        # is_mod = ships an mcmod.info descriptor = the DEFINITIVE "this is a MC mod" marker. This
-        # is what changelog/release tracking must filter on — a fork that is not a mod (rendering
-        # engine, meshing lib) should never be flagged as an untracked pack mod. (BUG: track_audit
-        # used is_fork and false-flagged CatzEngine/binary-greedy-meshing — 2026-07-07.)
-        src = os.path.join(path, "src")
-        is_mod = os.path.isdir(src) and any("mcmod.info" in fns for _, _, fns in os.walk(src))
-        repos.append({
-            "name": name,
-            "path": f"~/Documents/GitHub/{name}",
-            "slug": slug(origin),
-            "upstream": slug(upstream) or FORK_OVERRIDE.get(name),
-            "is_fork": is_fork,
-            "branch": git(path, "branch", "--show-current"),
-            "gradle": is_gradle,
-            "is_mod": is_mod,
-            "in_release_manifest": name in manifest_repos,
-        })
+    for path, rel in candidate_dirs(GITHUB_DIR):
+        r = inspect(path, rel, manifest_repos)
+        if r:
+            repos.append(r)
+    repos.sort(key=lambda r: r["name"].lower())
 
     out = {
         "_comment": "AUTO-GENERATED by Cat-Pack-Utilities/scan_repos.py — DO NOT hand-edit the repo "
