@@ -1,43 +1,80 @@
 #!/usr/bin/env python3
-"""matoulib_arch.py — auto-generates matoulib/ARCHITECTURE.md, a seam map of the matoulib mod source.
+"""matoulib_arch.py — auto-generates <repo>/ARCHITECTURE.md, a seam map of a matou mod source tree.
 
-Why (2026-07-10): matoulib is a large 1.7.10 Java mod (fr.iamacat.{gigafauna,matoulib}) with many
-`-Dmatoulib.*` gate flags, `@`-DSL content sections, mixins, and RPC devtools endpoints — nobody can see
-the shape at a glance without grepping. This statically scans every *.java under
-matoulib/src/main/java with regexes (never compiles/imports anything) and emits a high-signal seam map:
-feature-flag gate table, DSL-section table, registries, Content/Factory entrypoints, mixin targets, RPC
-devtools endpoints, CommonProxy wiring order, and a package tree — plus a package-level import graph
-(.dot). Mirrors the philosophy of `arch_map.py` (same dir): re-runnable, so the map never goes stale —
-run it after adding/removing a flag, DSL section, mixin, or RPC endpoint.
+Why (2026-07-10): the matou 1.7.10 codebase was split into two repos — `matoulib-core` (the lib:
+`-Dmatoulib.*` gate flags, `@`-DSL content sections, mixins, registries, RPC devtools) and `gigafauna`
+(the content consumer: GigafaunaRpc endpoints, BrowserContent, content factories, @Mod proxy wiring).
+Both are large Java mods whose shape nobody can see at a glance without grepping. This statically scans
+every *.java under a repo's own `fr.iamacat.<namespace>` package (regex only — never compiles/imports)
+and emits a high-signal seam map: feature-flag gate table, DSL-section table, registries, Content/Factory
+entrypoints, mixin targets, RPC devtools endpoints, CommonProxy wiring order, and a package tree — plus a
+package-level import graph (.dot). Mirrors the philosophy of `arch_map.py` (same dir): re-runnable, so the
+map never goes stale — run it after adding/removing a flag, DSL section, mixin, or RPC endpoint.
 
-Output goes into the matoulib repo itself (matoulib/ARCHITECTURE.md + .dot), not this repo — matoulib's
-source is the thing being mapped. The matoulib checkout path is derived from packenv (`E.GITHUB_ROOT`),
-never hardcoded.
+Output goes into the scanned repo itself (`<repo>/ARCHITECTURE.md` + `.dot`), not this repo — that repo's
+source is the thing being mapped. The repo checkout path is resolved by name from
+`memory/repos.json` (`E.REPOS_JSON`, `path` field), never hardcoded.
 
 Usage:
-    python3 matoulib_arch.py            # write matoulib/ARCHITECTURE.md (+ .dot)
-    python3 matoulib_arch.py --check    # exit 2 if ARCHITECTURE.md is stale vs source (release-preflight gate)
+    python3 matoulib_arch.py                       # default --repo matoulib-core
+    python3 matoulib_arch.py --repo gigafauna      # map the gigafauna consumer instead
+    python3 matoulib_arch.py --repo matoulib-core --check  # exit 2 if that repo's map is stale (release gate)
 """
 import argparse
+import json
 import os
 import re
 import sys
 
 import packenv as E
 
-MATOULIB_DIR = os.path.join(E.GITHUB_ROOT, "matoulib")
-SRC_ROOT = os.path.join(MATOULIB_DIR, "src", "main", "java")
-# Only the mod's own namespace is scanned — src/main/java also vendors a third-party API stub
-# (cofh/api/energy) that is not matoulib source and would pollute the flag/mixin/DSL/tree scan.
-WALK_ROOT = os.path.join(SRC_ROOT, "fr", "iamacat")
-ROOT_PACKAGE = "fr.iamacat"
-OUTPUT_MD = os.path.join(MATOULIB_DIR, "ARCHITECTURE.md")
-OUTPUT_DOT = os.path.join(MATOULIB_DIR, "ARCHITECTURE.dot")
+# repo name (repos.json) -> the single `fr.iamacat.<namespace>` package that repo owns. Each repo also
+# vendors a third-party API stub (cofh/api/energy) outside fr.iamacat, excluded by walking the namespace.
+REPO_NAMESPACES = {
+    "matoulib-core": "matoulib",
+    "gigafauna": "gigafauna",
+}
+DEFAULT_REPO = "matoulib-core"
+
+# Per-run globals, populated by configure() from the resolved --repo. Kept module-level so the scan
+# helpers (JavaFile, collect_java_files, build_package_tree, main) can reference them unchanged.
+REPO_NAME = None
+REPO_DIR = None
+SRC_ROOT = None
+WALK_ROOT = None
+ROOT_PACKAGE = None
+OUTPUT_MD = None
+OUTPUT_DOT = None
+
+
+def resolve_repo_dir(repo_name):
+    """Look up a repo's checkout dir by name in repos.json (path field). No hardcoded ~/GitHub paths."""
+    with open(E.REPOS_JSON, encoding="utf-8") as fh:
+        data = json.load(fh)
+    for entry in data.get("repos", []):
+        if entry.get("name") == repo_name:
+            return os.path.expanduser(entry["path"])
+    raise SystemExit(f"repo '{repo_name}' not found in {E.REPOS_JSON} (repos[].name).")
+
+
+def configure(repo_name):
+    global REPO_NAME, REPO_DIR, SRC_ROOT, WALK_ROOT, ROOT_PACKAGE, OUTPUT_MD, OUTPUT_DOT
+    namespace = REPO_NAMESPACES[repo_name]
+    REPO_NAME = repo_name
+    REPO_DIR = resolve_repo_dir(repo_name)
+    SRC_ROOT = os.path.join(REPO_DIR, "src", "main", "java")
+    # Only the mod's own namespace is scanned — src/main/java also vendors a third-party API stub
+    # (cofh/api/energy) outside fr.iamacat that is not this repo's source and would pollute the scan.
+    WALK_ROOT = os.path.join(SRC_ROOT, "fr", "iamacat", namespace)
+    ROOT_PACKAGE = f"fr.iamacat.{namespace}"
+    OUTPUT_MD = os.path.join(REPO_DIR, "ARCHITECTURE.md")
+    OUTPUT_DOT = os.path.join(REPO_DIR, "ARCHITECTURE.dot")
+
 
 GENERATED_NOTE = (
     "> Auto-generated by `Cat-Pack-Utilities/matoulib_arch.py` from a static regex scan of "
-    "`src/main/java` — do NOT hand-edit. Re-run `python3 matoulib_arch.py` (in Cat-Pack-Utilities) "
-    "after adding/removing a flag, DSL section, mixin, registry, or RPC endpoint. "
+    "`src/main/java` — do NOT hand-edit. Re-run `python3 matoulib_arch.py --repo <this-repo>` (in "
+    "Cat-Pack-Utilities) after adding/removing a flag, DSL section, mixin, registry, or RPC endpoint. "
     "`--check` gates the release preflight."
 )
 
@@ -258,7 +295,8 @@ def build_dot(files):
                 edges.add((from_pkg, to_pkg))
 
     nodes = sorted({p for e in edges for p in e})
-    lines = ["digraph matoulib_arch {", "  rankdir=LR;", "  node [shape=box, style=filled, fontsize=10, fillcolor=\"#1f6feb\", fontcolor=\"white\"];", ""]
+    graph_name = re.sub(r"[^A-Za-z0-9_]", "_", f"{REPO_NAME}_arch") if REPO_NAME else "matoulib_arch"
+    lines = [f"digraph {graph_name} {{", "  rankdir=LR;", "  node [shape=box, style=filled, fontsize=10, fillcolor=\"#1f6feb\", fontcolor=\"white\"];", ""]
     node_id = {p: "P_" + re.sub(r"[^A-Za-z0-9_]", "_", p) for p in nodes}
     for p in nodes:
         lines.append(f'  {node_id[p]} [label="{p}"];')
@@ -282,7 +320,8 @@ def build_markdown(files):
     _dot_text, dot_edges = build_dot(files)
 
     parts = [
-        "# matoulib — architecture map (AUTO-GENERATED by Cat-Pack-Utilities/matoulib_arch.py — DO NOT edit by hand)",
+        f"# {REPO_NAME} — architecture map "
+        "(AUTO-GENERATED by Cat-Pack-Utilities/matoulib_arch.py — DO NOT edit by hand)",
         "",
         GENERATED_NOTE,
         "",
@@ -375,7 +414,7 @@ def build_markdown(files):
             parts.append("")
 
     parts += [
-        "## 8. Package tree (`fr.iamacat.*`, depth-capped)",
+        f"## 8. Package tree (`{ROOT_PACKAGE}.*`, depth-capped)",
         "",
         "```",
         pkg_tree,
@@ -399,13 +438,18 @@ def summary_line(files, md_written_path):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--repo", choices=sorted(REPO_NAMESPACES), default=DEFAULT_REPO,
+                     help=f"which matou repo to map (default: {DEFAULT_REPO})")
     ap.add_argument("--check", action="store_true",
-                     help="exit 2 if matoulib/ARCHITECTURE.md is stale vs source (no write)")
+                     help="exit 2 if <repo>/ARCHITECTURE.md is stale vs source (no write)")
     ap.add_argument("--no-dot", action="store_true", help="skip writing ARCHITECTURE.dot")
     args = ap.parse_args()
 
-    if not os.path.isdir(SRC_ROOT):
-        print(f"matoulib source not found at {SRC_ROOT} (check packenv.GITHUB_ROOT).", file=sys.stderr)
+    configure(args.repo)
+
+    if not os.path.isdir(WALK_ROOT):
+        print(f"{REPO_NAME} source not found at {WALK_ROOT} "
+              f"(check repos.json path for '{REPO_NAME}').", file=sys.stderr)
         sys.exit(1)
 
     files = collect_java_files()
@@ -429,10 +473,10 @@ def main():
             stale.append("ARCHITECTURE.dot")
 
         if stale:
-            print(f"matoulib/{{{', '.join(stale)}}} STALE vs source — run "
-                  "`python3 matoulib_arch.py` to regenerate.", file=sys.stderr)
+            print(f"{REPO_NAME}/{{{', '.join(stale)}}} STALE vs source — run "
+                  f"`python3 matoulib_arch.py --repo {REPO_NAME}` to regenerate.", file=sys.stderr)
             sys.exit(2)
-        print("matoulib/ARCHITECTURE.md and .dot are up to date.")
+        print(f"{REPO_NAME}/ARCHITECTURE.md and .dot are up to date.")
         sys.exit(0)
 
     with open(OUTPUT_MD, "w", encoding="utf-8", newline="\n") as fh:

@@ -129,7 +129,7 @@ flowchart LR
     S_make_minimal_instance -.-> D_ART_HUB
     S_make_minimal_instance -.-> D_ART_INSTANCE_TEST
     S_make_minimal_instance -.-> D_ART_INSTANCES_ROOT
-    S_matoulib_arch -.-> D_ART_HUB
+    S_matoulib_arch -.-> D_ART_REPOS_JSON
     S_mixin_collision -.-> D_ART_HUB
     S_mixin_collision -.-> D_ART_INSTANCE_TEST
     S_mod_update_checker -.-> D_ART_SECRETS
@@ -202,7 +202,7 @@ flowchart LR
 | `housekeep.py` | keep the Mod-Sandbox memory files from bloating. | Mod-Sandbox hub root | — |
 | `MainClass.py` | (no module docstring) | — | — |
 | `make_minimal_instance.py` | Build a fast-boot MINIMAL instance to de-risk a single mixin/mod before the full pack. | Mod-Sandbox hub root, TEST client instance, instances root dir | — |
-| `matoulib_arch.py` | auto-generates matoulib/ARCHITECTURE.md, a seam map of the matoulib mod source. | Mod-Sandbox hub root | — |
+| `matoulib_arch.py` | auto-generates <repo>/ARCHITECTURE.md, a seam map of a matou mod source tree. | repos.json | — |
 | `mixin_collision.py` | cross-mod contested-target report for OaT mixins. | Mod-Sandbox hub root, TEST client instance | — |
 | `mod_update_checker.py` | Mod update checker for FileDirector-managed 1.7.10 packs. _[gh]_ | .env secrets (CF/Modrinth tokens), TEST client instance | — |
 | `modrinth_upload.py` | upload a mod jar as a new version on Modrinth. | .env secrets (CF/Modrinth tokens) | — |

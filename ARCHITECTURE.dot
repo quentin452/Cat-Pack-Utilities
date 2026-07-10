@@ -100,7 +100,7 @@ digraph arch {
   S_make_minimal_instance -> D_ART_HUB [style=dashed];
   S_make_minimal_instance -> D_ART_INSTANCE_TEST [style=dashed];
   S_make_minimal_instance -> D_ART_INSTANCES_ROOT [style=dashed];
-  S_matoulib_arch -> D_ART_HUB [style=dashed];
+  S_matoulib_arch -> D_ART_REPOS_JSON [style=dashed];
   S_mixin_collision -> D_ART_HUB [style=dashed];
   S_mixin_collision -> D_ART_INSTANCE_TEST [style=dashed];
   S_mod_update_checker -> D_ART_SECRETS [style=dashed];
