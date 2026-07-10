@@ -929,15 +929,23 @@ def release_one(mod, execute, skip_build, changelog_override=None, force_cf=Fals
     try:
         gh_action, gh_note = plan["GitHub"]
         if gh_action == "publish":
-            git(repo, "push", "origin", version)  # push the tag
-            # gh_title in the manifest hardcodes a version (e.g. "1.7.10 V1.17.5 — …"); substitute the
-            # ACTUAL release version so the GitHub title isn't stale (vécu 2026-07-09: title shipped as
-            # V1.17.5 for a V1.17.6 release, hand-fixed). No-op if gh_title doesn't carry the old version.
+            # Guard: the manifest gh_title must describe THIS release. It carries a version marker
+            # ("V1.18.0"); if that differs from the version being cut, the whole headline — INCLUDING the
+            # description after the em-dash — was authored for a PREVIOUS release, i.e. it is stale. The old
+            # code silently substituted only the version NUMBER, which shipped the prior release's
+            # description under the new version (vécu V1.18.0: V1.18.0 shipped V1.17.7's "CodeChickenLib…"
+            # headline). Block instead and require a curated headline per release (like the changelog is
+            # curated), not a stale manual field. Fix = update release-manifest.json gh_title for THIS cut.
             gh_title = mod["gh_title"]
-            old_ver = mod.get("version")
-            if old_ver and old_ver in gh_title and old_ver != version:
-                gh_title = gh_title.replace(old_ver, version)
-                log(f"gh_title: {old_ver} -> {version} (substituted actual release version)")
+            _tv = re.search(r"[Vv]\d+\.\d+\.\d+[\w.\-]*", gh_title)
+            _tv = _tv.group(0) if _tv else None
+            if _tv and _tv.lstrip("Vv") != str(version).lstrip("Vv"):
+                raise RuntimeError(
+                    f"{mod['name']}: manifest gh_title still describes {_tv} but this release is {version} — "
+                    f"its description is STALE (it was written for the previous release). Curate "
+                    f"release-manifest.json gh_title for THIS release before publishing. "
+                    f"(Silent version-number substitution used to mask this — vécu V1.18.0.)")
+            git(repo, "push", "origin", version)  # push the tag
             gh_cmd = ["gh", "release", "create", version, "-t", gh_title, "-F", notes, jar]
             if slug:
                 gh_cmd += ["-R", slug]  # target the fork, not gh's default (the upstream parent)
