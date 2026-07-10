@@ -112,6 +112,20 @@
       "problemMatcher": []
     },
     {
+      "label": "Tooling: Prism jar sync (dry-run) — SAFE",
+      "type": "shell",
+      "command": "python3 deploy_prism.py",
+      "detail": "Report which <mod>-test.jar in each PrismLauncher instance is STALE vs the freshest build/libs jar of its repo (matched by build-artifact prefix, so the RustMap→MatouMap rebrand is handled by the jar name). Read-only. Closes the proactive-deploy gap: a rebuilt jar not redeployed => the user relaunches Prism and tests a stale binary.",
+      "problemMatcher": []
+    },
+    {
+      "label": "Tooling: Prism jar sync (--apply)",
+      "type": "shell",
+      "command": "python3 deploy_prism.py --apply",
+      "detail": "Copy each fresh build/libs jar over its STALE <mod>-test.jar in the Prism instances (same filename). Mutates local test instances only (never outward). Run the dry-run first; takes effect on next instance launch.",
+      "problemMatcher": []
+    },
+    {
       "label": "Release: reserve slugs (dry-run + CF checklist) — SAFE",
       "type": "shell",
       "command": "python3 reserve_slugs.py --verify --cf-checklist",

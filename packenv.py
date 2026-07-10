@@ -103,6 +103,12 @@ INSTANCE_SERVER_CONFIG = _exp(get("INSTANCE_SERVER_CONFIG", os.path.join(INSTANC
 INSTANCE_TEST_MODS = os.path.join(INSTANCE_TEST, "mods")
 INSTANCE_SERVER_MODS = os.path.join(INSTANCE_SERVER, "mods")
 
+# PrismLauncher instances root (native instances the user launches by hand — Minimal-Matou for
+# OaT/matou/gigafauna, BiggessPackCatEdition* for the pack). Prism mods live under
+# <instance>/minecraft/mods (NOT .minecraft). Consumed by deploy_prism.py + the devtools flow.
+PRISM_ROOT = _exp(get("PRISM_ROOT",
+                      os.path.join(HOME, ".local/share/PrismLauncher/instances")))
+
 # ── secrets (.env.local; never printed) ─────────────────────────────────────────────────────────
 def cf_api_key():
     return get("CF_API_KEY")
@@ -129,6 +135,7 @@ def _check():
         ("INSTANCE_SERVER", INSTANCE_SERVER),
         ("INSTANCE_TEST_CONFIG", INSTANCE_TEST_CONFIG),
         ("INSTANCE_SERVER_CONFIG", INSTANCE_SERVER_CONFIG),
+        ("PRISM_ROOT", PRISM_ROOT),
     ]
     print("packenv resolved config (process-env > .env.local > .env > default):\n")
     for k, v in rows:
