@@ -45,6 +45,31 @@
       "type": "promptString",
       "description": "CurseForge numeric project id for the Gigafauna modpack (slug gigafauna-pack)",
       "default": ""
+    },
+    {
+      "id": "benchFlag",
+      "type": "pickString",
+      "description": "Async chunk-gen pipeline flag state that is BOOTED (must match -Dmatoulib.chunk.pipeline)",
+      "options": ["off", "on"],
+      "default": "off"
+    },
+    {
+      "id": "benchLabel",
+      "type": "promptString",
+      "description": "Baseline artifact name (e.g. C0-OFF, C1-ON) — written to memory/bench-captures/",
+      "default": "C0-OFF"
+    },
+    {
+      "id": "benchBaseline",
+      "type": "promptString",
+      "description": "A/B reference artifact label (usually the OFF capture)",
+      "default": "C0-OFF"
+    },
+    {
+      "id": "benchCandidate",
+      "type": "promptString",
+      "description": "A/B candidate artifact label (the ON capture)",
+      "default": "C0-ON"
     }
   ],
   "tasks": [
@@ -384,6 +409,26 @@
         "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities"
       },
       "detail": "Dry-run plan for the personal mods: auto-derives the next version from git tags AND the bump level from commit types (feat->minor, fix/perf->patch, feat!->major), prints the boot-verify plan. Read-only. Add --execute (uploads to GH/CF/Modrinth!) only after a full dry-run + user go.",
+      "problemMatcher": []
+    },
+    {
+      "label": "Bench: chunk-gen baseline (capture)",
+      "type": "shell",
+      "command": "python3 chunkgen_bench.py capture --flag ${input:benchFlag} --label ${input:benchLabel}",
+      "options": {
+        "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities"
+      },
+      "detail": "RIGOROUS chunk-gen baseline for the async-chunk rewrite (docs/32). Drives /worldgen/genprofile (ms/chunk median+p95 over N runs, drop warmup, deterministic virgin origins) + /metrics tick-health sampled under load + /worldgen/fingerprint bit-identity, writes a frozen artifact to memory/bench-captures/. IDLE-GUARD: refuses if ps --sort=-pcpu shows a competing hog or nvidia-smi shows GPU contention (the 'machine trop chargee fausse tout' lesson) — pass --force to override (recorded). Boot ONE matoulib-RPC instance in-world with the matching -Dmatoulib.chunk.pipeline flag FIRST (single-instance rule); the booted flag is verified against --flag.",
+      "problemMatcher": []
+    },
+    {
+      "label": "Bench: chunk-gen A/B compare",
+      "type": "shell",
+      "command": "python3 chunkgen_bench.py compare ${input:benchBaseline} ${input:benchCandidate}",
+      "options": {
+        "cwd": "${env:HOME}/Documents/GitHub/Cat-Pack-Utilities"
+      },
+      "detail": "A/B two frozen chunk-gen artifacts: reports the ms/chunk delta WITH the run-to-run spread — a delta inside the combined noise band is called INCONCLUSIVE, not a win (kills the noisy single-shot A/B). Also checks the /worldgen/fingerprint hashes: a mismatch = the async path changed generated blocks = HARD gate FAIL (exit 3), independent of any speedup.",
       "problemMatcher": []
     }
   ]

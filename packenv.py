@@ -67,6 +67,9 @@ GITHUB_ROOT = _exp(get("GITHUB_ROOT", os.path.join(HOME, "Documents/GitHub")))
 HUB = _exp(get("HUB", os.path.join(GITHUB_ROOT, "Mod-Sandbox")))
 REPOS_JSON = os.path.join(HUB, "memory", "repos.json")
 RELEASE_MANIFEST = os.path.join(HUB, "memory", "release-manifest.json")
+# Frozen benchmark baselines (chunk-gen A/B references, docs/32). Versioned in the hub so later
+# async-chunk phases A/B against a committed reference instead of a lost /tmp run.
+BENCH_CAPTURES = os.path.join(HUB, "memory", "bench-captures")
 
 # ── the pack ──────────────────────────────────────────────────────────────────────────────────
 PACK_NAME = get("PACK", "Biggess Pack Cat Edition")            # historical key PACK = the NAME
