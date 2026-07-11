@@ -251,6 +251,13 @@
       "problemMatcher": []
     },
     {
+      "label": "Matou: server smoke",
+      "type": "shell",
+      "command": "python3 matou_server_smoke.py --static-scan",
+      "detail": "Boot a minimal headless Forge DEDICATED server (matoulib+gigafauna+geckolib+unimixins) in a THROWAWAY temp dir to catch dedicated-only crashes a solo/integrated world masks (e.g. @SideOnly(CLIENT) referenced from server code). Gate = boot log + FML mod-list (no RPC — client-only). Uses the Minimal-Matou jars; port 25599 (never collides with a running client's RPC 25580); temp dir torn down on PASS, kept on FAIL. Exit non-zero = crash detected.",
+      "problemMatcher": []
+    },
+    {
       "label": "Release: dry-run all mods",
       "type": "shell",
       "command": "python3 release_mods.py",

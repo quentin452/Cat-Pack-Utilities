@@ -103,6 +103,14 @@ INSTANCE_SERVER_CONFIG = _exp(get("INSTANCE_SERVER_CONFIG", os.path.join(INSTANC
 INSTANCE_TEST_MODS = os.path.join(INSTANCE_TEST, "mods")
 INSTANCE_SERVER_MODS = os.path.join(INSTANCE_SERVER, "mods")
 
+# Forge 1.7.10 DEDICATED-SERVER template dir — a directory that already holds the boot essentials of a
+# working server: a `forge-*-universal.jar`, the `libraries/` tree, and `minecraft_server*.jar`. Used by
+# matou_server_smoke.py, which symlinks ONLY those essentials into a throwaway temp dir + a minimal 3-mod
+# set (matoulib+gigafauna+geckolib) to catch dedicated-only crashes an integrated/solo world masks
+# (@SideOnly(CLIENT) referenced from server code). Defaults to the pack server instance (it has all three);
+# the smoke NEVER writes into this dir — it is a read-only reference.
+FORGE_SERVER_TEMPLATE = _exp(get("FORGE_SERVER_TEMPLATE", INSTANCE_SERVER))
+
 # PrismLauncher instances root (native instances the user launches by hand — Minimal-Matou for
 # OaT/matou/gigafauna, BiggessPackCatEdition* for the pack). Prism mods live under
 # <instance>/minecraft/mods (NOT .minecraft). Consumed by deploy_prism.py + the devtools flow.
@@ -136,6 +144,7 @@ def _check():
         ("INSTANCE_TEST_CONFIG", INSTANCE_TEST_CONFIG),
         ("INSTANCE_SERVER_CONFIG", INSTANCE_SERVER_CONFIG),
         ("PRISM_ROOT", PRISM_ROOT),
+        ("FORGE_SERVER_TEMPLATE", FORGE_SERVER_TEMPLATE),
     ]
     print("packenv resolved config (process-env > .env.local > .env > default):\n")
     for k, v in rows:

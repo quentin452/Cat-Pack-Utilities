@@ -23,6 +23,7 @@ digraph arch {
   S_gen_placeholder_logos [label="gen_placeholder_logos.py", fillcolor="#1f6feb", fontcolor="white"];
   S_housekeep [label="housekeep.py", fillcolor="#1f6feb", fontcolor="white"];
   S_make_minimal_instance [label="make_minimal_instance.py", fillcolor="#1f6feb", fontcolor="white"];
+  S_matou_server_smoke [label="matou_server_smoke.py", fillcolor="#1f6feb", fontcolor="white"];
   S_matoulib_arch [label="matoulib_arch.py", fillcolor="#1f6feb", fontcolor="white"];
   S_mixin_collision [label="mixin_collision.py", fillcolor="#1f6feb", fontcolor="white"];
   S_mod_update_checker [label="mod_update_checker.py", fillcolor="#1f6feb", fontcolor="white"];
@@ -57,6 +58,7 @@ digraph arch {
   D_ART_MODRINTH_BUNDLE [label="modrinth.bundle.json", shape=cylinder, fillcolor="#f2cc60"];
   D_ART_PACK_DIR [label="pack repo (PACK_DIR family)", shape=cylinder, fillcolor="#f2cc60"];
   D_ART_OTHER_BENCH_CAPTURES [label="packenv.BENCH_CAPTURES (unclassified)", shape=cylinder, fillcolor="#f2cc60"];
+  D_ART_OTHER_FORGE_SERVER_TEMPLATE [label="packenv.FORGE_SERVER_TEMPLATE (unclassified)", shape=cylinder, fillcolor="#f2cc60"];
   D_ART_OTHER_PRISM_ROOT [label="packenv.PRISM_ROOT (unclassified)", shape=cylinder, fillcolor="#f2cc60"];
   D_ART_RELEASE_MANIFEST [label="release-manifest.json", shape=cylinder, fillcolor="#f2cc60"];
   D_ART_REPOS_JSON [label="repos.json", shape=cylinder, fillcolor="#f2cc60"];
@@ -64,6 +66,7 @@ digraph arch {
 
   S_bundle_regression_gate -> S_changelog_from_bundles;
   S_dist_parity -> S_release_mods;
+  S_matou_server_smoke -> S_boot_crash_scan;
   S_pipeline_status -> S_pack_sync;
   S_release_changeset -> S_bundle_drift;
   S_release_changeset -> S_changelog_from_git;
@@ -102,6 +105,9 @@ digraph arch {
   S_make_minimal_instance -> D_ART_HUB [style=dashed];
   S_make_minimal_instance -> D_ART_INSTANCE_TEST [style=dashed];
   S_make_minimal_instance -> D_ART_INSTANCES_ROOT [style=dashed];
+  S_matou_server_smoke -> D_ART_OTHER_FORGE_SERVER_TEMPLATE [style=dashed];
+  S_matou_server_smoke -> D_ART_OTHER_PRISM_ROOT [style=dashed];
+  S_matou_server_smoke -> D_ART_REPOS_JSON [style=dashed];
   S_matoulib_arch -> D_ART_REPOS_JSON [style=dashed];
   S_mixin_collision -> D_ART_HUB [style=dashed];
   S_mixin_collision -> D_ART_INSTANCE_TEST [style=dashed];
