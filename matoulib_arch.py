@@ -298,8 +298,23 @@ def build_dot(files):
     graph_name = re.sub(r"[^A-Za-z0-9_]", "_", f"{REPO_NAME}_arch") if REPO_NAME else "matoulib_arch"
     lines = [f"digraph {graph_name} {{", "  rankdir=LR;", "  node [shape=box, style=filled, fontsize=10, fillcolor=\"#1f6feb\", fontcolor=\"white\"];", ""]
     node_id = {p: "P_" + re.sub(r"[^A-Za-z0-9_]", "_", p) for p in nodes}
-    for p in nodes:
+    # Distinguish packages the repo OWNS (internal, solid blue) from packages it merely IMPORTS
+    # (external forward-edges — e.g. a consumer -> matoulib.*): the latter are boxed in a dashed
+    # "external (imported)" cluster + greyed, so at a glance you read "what this repo IS" vs "what
+    # it DEPENDS ON". A lib repo (ROOT_PACKAGE == fr.iamacat.matoulib) has no external node → no cluster.
+    internal = [p for p in nodes if p.startswith(ROOT_PACKAGE)]
+    external = [p for p in nodes if not p.startswith(ROOT_PACKAGE)]
+    for p in internal:
         lines.append(f'  {node_id[p]} [label="{p}"];')
+    if external:
+        lines.append("")
+        lines.append("  subgraph cluster_external {")
+        lines.append('    label="external (imported, not owned by this repo)";')
+        lines.append('    style=dashed; color="#999999"; fontcolor="#666666";')
+        lines.append('    node [style="filled,dashed", fillcolor="#eaeef2", fontcolor="#24292f", color="#999999"];')
+        for p in external:
+            lines.append(f'    {node_id[p]} [label="{p}"];')
+        lines.append("  }")
     lines.append("")
     for a, b in sorted(edges):
         lines.append(f"  {node_id[a]} -> {node_id[b]};")
