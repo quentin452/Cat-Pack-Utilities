@@ -19,6 +19,7 @@ digraph arch {
   S_config_sync [label="config_sync.py", fillcolor="#1f6feb", fontcolor="white"];
   S_deploy_prism [label="deploy_prism.py", fillcolor="#1f6feb", fontcolor="white"];
   S_dist_parity [label="dist_parity.py", fillcolor="#1f6feb", fontcolor="white"];
+  S_gen_legacy_hashes [label="gen_legacy_hashes.py", fillcolor="#1f6feb", fontcolor="white"];
   S_gen_placeholder_logos [label="gen_placeholder_logos.py", fillcolor="#1f6feb", fontcolor="white"];
   S_housekeep [label="housekeep.py", fillcolor="#1f6feb", fontcolor="white"];
   S_make_minimal_instance [label="make_minimal_instance.py", fillcolor="#1f6feb", fontcolor="white"];
@@ -96,6 +97,7 @@ digraph arch {
   S_dist_parity -> D_ART_HUB [style=dashed];
   S_dist_parity -> D_ART_RELEASE_MANIFEST [style=dashed];
   S_dist_parity -> D_ART_REPOS_JSON [style=dashed];
+  S_gen_legacy_hashes -> D_ART_REPOS_JSON [style=dashed];
   S_housekeep -> D_ART_HUB [style=dashed];
   S_make_minimal_instance -> D_ART_HUB [style=dashed];
   S_make_minimal_instance -> D_ART_INSTANCE_TEST [style=dashed];
