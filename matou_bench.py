@@ -23,6 +23,10 @@ Pairing: the autoworld ('saves/dev') is seed-0 FIXED (DevAutoWorld), so wiping i
 IDENTICAL terrain for every leg -> per-anchor paired A/B, same rigor doctrine as chunkgen_bench
 (median+p95, spread-based INCONCLUSIVE verdicts, machine-idle guard).
 
+Flag semantics: the BASE stack for every leg defaults to the instance.cfg's current JvmArgs — the
+full modded stack the user actually plays (a bare-flags leg would silently bench a VANILLA GenLayer
+overworld instead of the matou-owned one). A leg spec then overrides individual -D keys on top.
+
 Traps baked in (CONTROLLER.md game-gate recipe):
   * SINGLE-INSTANCE — refuses to start while a game java (org.prismlauncher.EntryPoint) is alive;
     kills ONLY that process, never the user's Prism GUI (pkill -x prismlauncher would kill it).
@@ -53,11 +57,39 @@ import packenv as E
 from chunkgen_bench import (rpc, wait_in_world, median, percentile, spread, idle_guard, TickSampler)
 
 DEFAULT_RPC = "http://127.0.0.1:25580"
-GAME_PROC_PATTERN = "org.prismlauncher.EntryPoint"  # the GAME java — NEVER the prismlauncher GUI
+# The GAME java — NEVER the prismlauncher GUI. Bracket trick: a caller whose own cmdline embeds the
+# pattern (bash -c wrappers, tail pipelines) would otherwise self-match and get killed.
+GAME_PROC_PATTERN = "org.prismlauncher.EntryPoin[t]"
 AUTOWORLD_SAVE = "dev"  # DevAutoWorld.WORLD_NAME, fixed seed 0 => identical terrain across wipes
 
-# Flags every leg needs to boot the bench loop itself; leg flags are appended after these.
-BASE_FLAGS = ("-Dmatoulib.rpc=true -Dmatoulib.autoworld=true -Dmatoulib.autoworld.type=default")
+# Flags the runner itself depends on — forced into every leg regardless of base/leg spec.
+REQUIRED_FLAGS = "-Dmatoulib.rpc=true -Dmatoulib.autoworld=true"
+
+
+def parse_dflags(s):
+    """'-Da=b -Dc=d ...' -> ordered {key: token}. Non -D tokens keep their own token as key (verbatim)."""
+    out = {}
+    for tok in s.split():
+        key = tok.split("=", 1)[0] if tok.startswith("-D") else tok
+        out[key] = tok
+    return out
+
+
+def merge_flags(*flag_strs):
+    """Later strings override earlier ones PER -D KEY (a leg toggles one flag on top of the base
+    modded stack instead of replacing the whole JVM line — the whole point of an A/B leg)."""
+    merged = {}
+    for s in flag_strs:
+        merged.update(parse_dflags(s or ""))
+    return " ".join(merged.values())
+
+
+def read_jvm_args(cfg_path):
+    with open(cfg_path, "r", encoding="utf-8") as fh:
+        for line in fh:
+            if line.startswith("JvmArgs="):
+                return line.split("=", 1)[1].strip().strip('"')
+    return ""
 
 
 # ── process lifecycle ────────────────────────────────────────────────────────────────────────────
@@ -322,12 +354,12 @@ def spark_summary(profile_path, top=15):
 # ── leg lifecycle ────────────────────────────────────────────────────────────────────────────────
 
 
-def run_leg(name, leg_flags, args, paths, cfg_guard):
-    print(f"\n== leg '{name}'  flags: {leg_flags or '(base only)'}")
+def run_leg(name, leg_flags, base_flags, args, paths, cfg_guard):
+    print(f"\n== leg '{name}'  overrides: {leg_flags or '(base only)'}")
     kill_game()
     if not args.keep_world:
         wipe_autoworld(paths["mc"])
-    flags = (BASE_FLAGS + " " + leg_flags).strip()
+    flags = merge_flags(base_flags, leg_flags, REQUIRED_FLAGS)
     set_jvm_args(paths["cfg"], flags)
     if not args.no_touch_options:
         force_bench_options(os.path.join(paths["mc"], "options.txt"))
@@ -517,15 +549,19 @@ def cmd_run(args):
     cfg_guard = FileGuard(paths["cfg"])
     opt_path = os.path.join(paths["mc"], "options.txt")
     opt_guard = FileGuard(opt_path) if os.path.isfile(opt_path) else None
+    # Base = the instance's CURRENT modded flag stack (bench what the user actually plays), unless
+    # overridden. Base-only legs boot the FULL matou stack — never a bare vanilla overworld.
+    base_flags = args.base_flags if args.base_flags is not None else read_jvm_args(paths["cfg"])
+    print(f"base flags: {merge_flags(base_flags, REQUIRED_FLAGS)}")
     artifact = {"tag": tag, "date": datetime.now(timezone.utc).isoformat(),
-                "instance": args.instance, "guard": guard,
+                "instance": args.instance, "guard": guard, "baseFlags": base_flags,
                 "args": {k: getattr(args, k) for k in
                          ("fps_window", "walk_steps", "walk_stride", "gen_radius",
                           "spawn_mobs", "warmup", "anchor_x", "anchor_z")},
                 "legs": []}
     try:
         for name, flags in legs_spec:
-            leg = run_leg(name, flags, args, paths, cfg_guard)
+            leg = run_leg(name, flags, base_flags, args, paths, cfg_guard)
             leg["summary"] = summarize(leg)
             artifact["legs"].append(leg)
             if leg["phases"].get("station", {}).get("fpsMissing"):
@@ -563,8 +599,11 @@ def main():
 
     r = sub.add_parser("run", help="run legs end-to-end and write artifact + report")
     r.add_argument("--leg", action="append", default=[],
-                   help='leg spec "name:-Dflag1=... -Dflag2=..." (flags appended to base; empty = base only). '
-                        "First leg = baseline for deltas.")
+                   help='leg spec "name:-Dflag1=... -Dflag2=..." — overrides applied PER -D KEY on top of the '
+                        "base stack (empty = base as-is). First leg = baseline for deltas.")
+    r.add_argument("--base-flags", default=None,
+                   help="base JVM flag stack for every leg (default: the instance.cfg's current JvmArgs = "
+                        "the modded stack the user plays)")
     r.add_argument("--instance", default="Minimal-Matou")
     r.add_argument("--rpc", default=DEFAULT_RPC)
     r.add_argument("--display", default=os.environ.get("DISPLAY", ":2"))
