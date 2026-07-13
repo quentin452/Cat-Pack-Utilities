@@ -84,6 +84,9 @@ FLAG_READ_MARKERS = (
     "Long.getLong", "System.getProperty",
 )
 CONST_DECL_RE = re.compile(r'\b\w*(?:FLAG|PROP)\w*\s*=\s*"(matoulib\.[A-Za-z0-9_.]+)"')
+# In a *Flags.java holder every "matoulib.*" string const IS a flag, whatever the const is named
+# (WorldgenFlags.OVERWORLD was invisible to CONST_DECL_RE, which requires FLAG|PROP in the name).
+FLAGS_FILE_CONST_RE = re.compile(r'=\s*"(matoulib\.[A-Za-z0-9_.]+)"')
 
 DSL_IMPL_RE = re.compile(r'\bclass\s+(\w+)\b[^{]*\bimplements\s+DslSection<\s*(\w+)\s*>')
 DIRECTIVE_RE = re.compile(r'directive\s*\(\s*\)\s*\{.*?return\s*"([^"]+)"\s*;', re.S)
@@ -143,6 +146,9 @@ def extract_flags(files):
                     flag_files.setdefault(m.group(1), set()).add(jf.rel_posix)
             for m in CONST_DECL_RE.finditer(line):
                 flag_files.setdefault(m.group(1), set()).add(jf.rel_posix)
+            if jf.rel_posix.endswith("Flags.java"):
+                for m in FLAGS_FILE_CONST_RE.finditer(line):
+                    flag_files.setdefault(m.group(1), set()).add(jf.rel_posix)
     return flag_files
 
 
