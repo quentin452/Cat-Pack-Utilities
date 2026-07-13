@@ -80,12 +80,20 @@ GENERATED_NOTE = (
 
 FLAG_RE = re.compile(r'"(matoulib\.[A-Za-z0-9_.]+)"')
 FLAG_READ_MARKERS = (
+    # legacy direct JDK reads
     "Boolean.getBoolean", "Boolean.parseBoolean", "Integer.getInteger",
     "Long.getLong", "System.getProperty",
+    # routed through fr.iamacat.matoulib.core.MatouFlags (2026-07-14 refactor: every direct JDK flag
+    # read migrates to MatouFlags.<method>("matoulib.x") — same-line literal is still picked up by
+    # FLAG_RE, this just widens which lines get scanned for it).
+    "MatouFlags.bool(", "MatouFlags.i32(", "MatouFlags.i64(",
+    "MatouFlags.f32(", "MatouFlags.f64(", "MatouFlags.str(", "MatouFlags.raw(",
 )
 CONST_DECL_RE = re.compile(r'\b\w*(?:FLAG|PROP)\w*\s*=\s*"(matoulib\.[A-Za-z0-9_.]+)"')
 # In a *Flags.java holder every "matoulib.*" string const IS a flag, whatever the const is named
 # (WorldgenFlags.OVERWORLD was invisible to CONST_DECL_RE, which requires FLAG|PROP in the name).
+# MatouFlags.java itself is excluded from this (see extract_flags) — it's the resolver/router, not a
+# holder of matoulib.* literal constants.
 FLAGS_FILE_CONST_RE = re.compile(r'=\s*"(matoulib\.[A-Za-z0-9_.]+)"')
 
 DSL_IMPL_RE = re.compile(r'\bclass\s+(\w+)\b[^{]*\bimplements\s+DslSection<\s*(\w+)\s*>')
@@ -140,6 +148,12 @@ def trim_package(pkg, max_parts=4):
 def extract_flags(files):
     flag_files = {}  # flag -> set(rel_posix)
     for jf in files:
+        if jf.class_name == "MatouFlags":
+            # The flag *resolver* (fr.iamacat.matoulib.core.MatouFlags) — holds no matoulib.*
+            # literals of its own (javadoc examples use unquoted {@code matoulib.x} form, which
+            # FLAG_RE's quote requirement already ignores). Skip explicitly so it never gets
+            # attributed as the "location" of every flag it merely routes reads through.
+            continue
         for line in jf.text.splitlines():
             if any(marker in line for marker in FLAG_READ_MARKERS):
                 for m in FLAG_RE.finditer(line):
