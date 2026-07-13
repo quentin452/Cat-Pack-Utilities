@@ -154,29 +154,59 @@ class FileGuard:
         with open(path, "rb") as fh:
             self.original = fh.read()
 
-    def restore(self):
-        with open(self.path, "wb") as fh:
-            fh.write(self.original)
+    def restore(self, verify_retries=0, settle_s=5):
+        """Write the original bytes back. With verify_retries > 0, wait settle_s, re-read and
+        rewrite until the content sticks: `prismlauncher -l` DELEGATES the launch to the
+        permanently-running Prism GUI, which caches instance.cfg and rewrites it asynchronously
+        after game exit (lastTimePlayed etc.) — clobbering a naive one-shot restore with the last
+        leg's flags (the instance.cfg GUI trap, confirmed live at the 2026-07-13 gate)."""
+        for attempt in range(verify_retries + 1):
+            with open(self.path, "wb") as fh:
+                fh.write(self.original)
+            if verify_retries == 0:
+                return True
+            time.sleep(settle_s)
+            with open(self.path, "rb") as fh:
+                if fh.read() == self.original:
+                    return True
+            print(f"  restore of {os.path.basename(self.path)} clobbered (Prism GUI rewrite), retry "
+                  f"{attempt + 1}/{verify_retries}")
+        return False
 
 
-def set_jvm_args(cfg_path, flags):
+def set_jvm_args(cfg_path, flags, verify_retries=3, settle_s=5):
+    """Write the leg's JvmArgs, then verify it STUCK: the Prism GUI (launch delegate) rewrites
+    instance.cfg asynchronously after a game exit, and its stale cached JvmArgs can land AFTER our
+    edit — the next leg would silently boot with the PREVIOUS leg's flags (mislabeled A/B)."""
     if game_pids():
         sys.exit("refusing to edit instance.cfg while the game is running")
-    with open(cfg_path, "r", encoding="utf-8") as fh:
-        lines = fh.read().splitlines(True)
-    out, seen = [], False
-    for line in lines:
-        if line.startswith("JvmArgs="):
-            out.append(f'JvmArgs="{flags}"\n')
-            seen = True
-        elif line.startswith("OverrideJavaArgs="):
-            out.append("OverrideJavaArgs=true\n")
-        else:
-            out.append(line)
-    if not seen:
-        out.append(f'JvmArgs="{flags}"\n')
-    with open(cfg_path, "w", encoding="utf-8") as fh:
-        fh.writelines(out)
+    want = f'JvmArgs="{flags}"\n'
+
+    def write_once():
+        with open(cfg_path, "r", encoding="utf-8") as fh:
+            lines = fh.read().splitlines(True)
+        out, seen = [], False
+        for line in lines:
+            if line.startswith("JvmArgs="):
+                out.append(want)
+                seen = True
+            elif line.startswith("OverrideJavaArgs="):
+                out.append("OverrideJavaArgs=true\n")
+            else:
+                out.append(line)
+        if not seen:
+            out.append(want)
+        with open(cfg_path, "w", encoding="utf-8") as fh:
+            fh.writelines(out)
+
+    for attempt in range(verify_retries + 1):
+        write_once()
+        time.sleep(settle_s)
+        with open(cfg_path, "r", encoding="utf-8") as fh:
+            if want in fh.read():
+                return
+        print(f"  instance.cfg edit clobbered (Prism GUI rewrite), retry {attempt + 1}/{verify_retries}")
+    sys.exit("instance.cfg edit never stuck — Prism GUI keeps rewriting it; close the GUI and retry")
 
 
 def force_bench_options(options_path):
@@ -589,10 +619,11 @@ def cmd_run(args):
     finally:
         kill_game()
         if not args.keep_cfg:
-            cfg_guard.restore()
+            ok_cfg = cfg_guard.restore(verify_retries=3)
             if opt_guard:
-                opt_guard.restore()
-            print("\nrestored instance.cfg + options.txt")
+                opt_guard.restore(verify_retries=1)
+            print("\nrestored instance.cfg + options.txt" if ok_cfg
+                  else "\nWARN: instance.cfg restore kept being clobbered — CHECK IT BY HAND")
         else:
             print("\n--keep-cfg: instance.cfg left with the LAST leg's flags")
 
