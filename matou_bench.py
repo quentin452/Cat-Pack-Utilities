@@ -308,7 +308,14 @@ def phase_spawn(rpc_base, args):
 
 
 def spark_start(rpc_base, thread_name):
-    r = rpc(rpc_base, "/clientcmd", {"q": f'sparkc profiler --start --thread "{thread_name}"'})
+    """Default: NO --thread flag (sparkc samples the client thread). Forge's executeCommand splits
+    args on spaces, so a quoted 'Client thread' arrives as '\"Client' + 'thread\"' -> spark matches
+    no thread and saves an EMPTY profile (~1.5 KB, found at the gate). Thread filtering belongs to
+    spark_parse at analysis time; only pass --spark-thread for single-word names."""
+    q = "sparkc profiler --start"
+    if thread_name:
+        q += f" --thread {thread_name}"
+    r = rpc(rpc_base, "/clientcmd", {"q": q})
     return bool(r.get("ok"))
 
 
@@ -435,14 +442,26 @@ def summarize(leg):
     if "gen" in p:
         g = p["gen"]["genprofile"]
         if g.get("ok"):
-            s["genMsPerChunk"] = g.get("avgMs")
-            s["genWallMs"] = g.get("elapsedMs")
-            s["genChunks"] = g.get("chunks")
+            # RPC JSON serializes some numbers as strings ("1.279") — coerce here, once.
+            s["genMsPerChunk"] = _num(g.get("avgMs"))
+            s["genWallMs"] = _num(g.get("elapsedMs"))
+            s["genChunks"] = _num(g.get("chunks"))
         s["tickGen"] = _tick_stats(p["gen"]["ticks"])
     if "spawn" in p:
         s["tickSpawn"] = _tick_stats(p["spawn"]["ticks"])
         s["fpsSpawn"] = _fps_stats(p["spawn"]["fps"])
     return s
+
+
+def _num(v):
+    """Coerce RPC values that may arrive as strings; None stays None."""
+    if v is None:
+        return None
+    try:
+        f = float(v)
+        return int(f) if f.is_integer() else f
+    except (TypeError, ValueError):
+        return None
 
 
 def _fmt(v):
@@ -451,6 +470,7 @@ def _fmt(v):
 
 def _delta_line(base, cand, noise, higher_is_better):
     """Delta % + verdict; a delta inside the noise band (spread) is INCONCLUSIVE, not a win."""
+    base, cand = _num(base), _num(cand)  # pre-fix artifacts carry stringly-typed gen numbers
     if base in (None, 0) or cand is None:
         return "-"
     d = (cand - base) / abs(base) * 100.0
@@ -624,7 +644,8 @@ def main():
     r.add_argument("--y", type=int, default=90)
     r.add_argument("--dim", type=int, default=0)
     r.add_argument("--spark", action="store_true", help="client spark profiler auto-dump per leg")
-    r.add_argument("--spark-thread", default="Client thread")
+    r.add_argument("--spark-thread", default=None,
+                   help="optional spark --thread filter (single word only — Forge splits args on spaces)")
     r.add_argument("--keep-world", action="store_true", help="do NOT wipe saves/dev between legs")
     r.add_argument("--keep-cfg", action="store_true", help="leave last leg's JvmArgs in instance.cfg")
     r.add_argument("--no-touch-options", action="store_true")
