@@ -23,6 +23,7 @@ digraph arch {
   S_gen_placeholder_logos [label="gen_placeholder_logos.py", fillcolor="#1f6feb", fontcolor="white"];
   S_housekeep [label="housekeep.py", fillcolor="#1f6feb", fontcolor="white"];
   S_make_minimal_instance [label="make_minimal_instance.py", fillcolor="#1f6feb", fontcolor="white"];
+  S_matou_bench [label="matou_bench.py", fillcolor="#1f6feb", fontcolor="white"];
   S_matou_server_smoke [label="matou_server_smoke.py", fillcolor="#1f6feb", fontcolor="white"];
   S_matoulib_arch [label="matoulib_arch.py", fillcolor="#1f6feb", fontcolor="white"];
   S_mixin_collision [label="mixin_collision.py", fillcolor="#1f6feb", fontcolor="white"];
@@ -43,6 +44,7 @@ digraph arch {
   S_scan_repos [label="scan_repos.py", fillcolor="#1f6feb", fontcolor="white"];
   S_security_audit [label="security_audit.py", fillcolor="#1f6feb", fontcolor="white"];
   S_server_bootstrap_parity [label="server_bootstrap_parity.py", fillcolor="#1f6feb", fontcolor="white"];
+  S_spark_parse [label="spark_parse.py", fillcolor="#1f6feb", fontcolor="white"];
   S_spark_profile [label="spark_profile.py", fillcolor="#1f6feb", fontcolor="white"];
   S_triage_forks [label="triage_forks.py", fillcolor="#1f6feb", fontcolor="white"];
   S_update_local [label="update_local.py", fillcolor="#1f6feb", fontcolor="white"];
@@ -66,6 +68,7 @@ digraph arch {
 
   S_bundle_regression_gate -> S_changelog_from_bundles;
   S_dist_parity -> S_release_mods;
+  S_matou_bench -> S_chunkgen_bench;
   S_matou_server_smoke -> S_boot_crash_scan;
   S_pipeline_status -> S_pack_sync;
   S_release_changeset -> S_bundle_drift;
@@ -105,6 +108,8 @@ digraph arch {
   S_make_minimal_instance -> D_ART_HUB [style=dashed];
   S_make_minimal_instance -> D_ART_INSTANCE_TEST [style=dashed];
   S_make_minimal_instance -> D_ART_INSTANCES_ROOT [style=dashed];
+  S_matou_bench -> D_ART_OTHER_BENCH_CAPTURES [style=dashed];
+  S_matou_bench -> D_ART_OTHER_PRISM_ROOT [style=dashed];
   S_matou_server_smoke -> D_ART_OTHER_FORGE_SERVER_TEMPLATE [style=dashed];
   S_matou_server_smoke -> D_ART_OTHER_PRISM_ROOT [style=dashed];
   S_matou_server_smoke -> D_ART_REPOS_JSON [style=dashed];
