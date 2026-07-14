@@ -23,6 +23,18 @@
       "default": "60"
     },
     {
+      "id": "sparkProfileFile",
+      "type": "promptString",
+      "description": "Path to a .sparkprofile file (e.g. ~/Téléchargements/xxx.sparkprofile or an instance config/profile-*.sparkprofile)",
+      "default": ""
+    },
+    {
+      "id": "sparkMethod",
+      "type": "promptString",
+      "description": "Method-name substring to hunt (obf profile = SRG name, e.g. func_72964_e for getChunkFromChunkCoords)",
+      "default": ""
+    },
+    {
       "id": "deriskMod",
       "type": "promptString",
       "description": "Target mod name substring (from the pack) to de-risk on a fast minimal instance",
@@ -234,6 +246,20 @@
         "cwd": "${env:HOME}/Documents/GitHub/privates-minecraft-modpack"
       },
       "detail": "Insert the derived block into the pack CHANGELOG for real (uncurated \u2014 prefer --from-derive with a curated file for player-facing wording).",
+      "problemMatcher": []
+    },
+    {
+      "label": "Profiling: spark hot-path tree",
+      "type": "shell",
+      "command": "python3 spark_parse.py ${input:sparkProfileFile}",
+      "detail": "Parse a .sparkprofile locally (no web viewer) into the hot-path tree per thread. Add --top 30 for a flat scan.",
+      "problemMatcher": []
+    },
+    {
+      "label": "Profiling: spark find method (all call sites)",
+      "type": "shell",
+      "command": "python3 spark_find.py ${input:sparkProfileFile} ${input:sparkMethod}",
+      "detail": "Aggregate EVERY call site of a method across the profile with caller chains — catches cost scattered over many small sites (e.g. getChunkFromChunkCoords = 11% over 9 sites). Obf profiles: use the SRG name (func_XXXXX_x).",
       "problemMatcher": []
     },
     {
