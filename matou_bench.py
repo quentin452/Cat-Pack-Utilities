@@ -319,7 +319,7 @@ def phase_spawn(rpc_base, args):
     spawned = []
     for _ in range(args.spawn_mobs):
         try:
-            spawned.append(rpc(rpc_base, "/spawnmob", {"id": args.spawn_id}).get("ok", False))
+            spawned.append(rpc(rpc_base, "/spawnmob", {"def": args.spawn_id}).get("ok", False))
         except Exception:
             spawned.append(False)
     ticks = TickSampler(rpc_base)
