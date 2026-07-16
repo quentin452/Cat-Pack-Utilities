@@ -27,9 +27,20 @@ Existing endpoints cover all three axes, so NO new measurement endpoint was need
   /worldgen/lightperf       -> relight ADD/REMOVE avg us (the cost genprofile/Timers do NOT capture,
                                since 1.7.10 light propagation is deferred off the gen path)
   /metrics                  -> same tick-health axis, plus (C2) the EFFECTIVE asyncLight flag state
-  /worldgen/lightfingerprint-> deterministic FNV-1a sky+block nibble hash for the light bit-identity gate
+  /worldgen/lightsettle     -> drain barrier: polls until the fp region's async matou apply has settled
+                               (every inner chunk isLightPopulated + 0 inflight). Under C2 the gen-light is
+                               HEAD-cancelled + submitted ASYNC and drained on later ticks, so a cold
+                               fingerprint read hashes UNSETTLED light — the BUG-085 defect. We poll across
+                               ticks until drained, THEN fingerprint.
+  /worldgen/lightfingerprint-> deterministic FNV-1a sky+block nibble hash for the light bit-identity gate,
+                               read --fp-reads times to prove it is idempotent (unstable = relight-on-read
+                               contamination, BUG-085).
+  /worldgen/fingerprint     -> block-state hash of the SAME region: compare() requires it identical OFF vs
+                               ON before trusting the light delta (rules out a terrain-determinism confound).
   A second label axis, --phosphor {on,off}, is cross-checked against the "phosphor" field ArchaicFix
   stamps into /worldgen/lightperf, so the 4-way matrix (asyncOFF/ON x phosphorOFF/ON) stays distinct.
+  compare() reports INCONCLUSIVE (exit 4) if a leg did not settle / was non-idempotent / terrain differs;
+  PASS/FAIL (exit 0/3) on the light hash only when the gate ran validly.
 
 Single-instance rule: this script NEVER boots/kills the game. Boot ONE matoulib-RPC instance
 (-Dmatoulib.rpc=true) with the pipeline flag set the way you are capturing, get in-world, THEN run.
@@ -424,6 +435,31 @@ def _write_markdown(path, a):
 # ── capture (light, C2 async-light A/B) ─────────────────────────────────────────────────────────────
 
 
+def _settle_region(rpc_base, x, z, r, dim, timeout_s, poll_s):
+    """Poll /worldgen/lightsettle until the fp region reports drained — every inner chunk isLightPopulated
+    AND no async light still in flight — or until timeout. This is the BUG-085 fix: under C2 the gen-light
+    populate is HEAD-cancelled and submitted ASYNC, drained by LightScheduler on LATER ticks, so a cold
+    fingerprint read (straight after loadChunk) hashes light that has not settled = the unstable, "async
+    apply never seen" hash. Each poll is a separate RPC, so the server ticks (and drains) between polls;
+    we fingerprint only once the region is fully settled. Returns the settle trace for the artifact."""
+    deadline = time.time() + timeout_s
+    polls = 0
+    while True:
+        last = rpc(rpc_base, "/worldgen/lightsettle", {"x": x, "z": z, "radius": r, "dim": dim})
+        polls += 1
+        if not last.get("ok"):
+            return {"ok": False, "error": last, "polls": polls, "drained": False}
+        print(f"    settle poll {polls}: pending {last.get('pending')}/{last.get('chunks')} "
+              f"(populated {last.get('populated')}, inflight {last.get('inflight')})")
+        if last.get("drained"):
+            return {"ok": True, "drained": True, "polls": polls,
+                    "chunks": last.get("chunks"), "pending_final": 0}
+        if time.time() >= deadline:
+            return {"ok": True, "drained": False, "timed_out": True, "polls": polls,
+                    "chunks": last.get("chunks"), "pending_final": last.get("pending")}
+        time.sleep(poll_s)
+
+
 def capture_light(args, rpc_base, guard):
     """--metric light: same skeleton as capture() (idle-guard already done by the caller, paired
     deterministic origins, median/p95/spread, hard-gate fingerprint) but drives /worldgen/lightperf
@@ -503,9 +539,40 @@ def capture_light(args, rpc_base, guard):
     tick_series = [s["meanTickMs"] for s in sampler.samples if s["meanTickMs"] >= 0]
     tps_series = [s["tps"] for s in sampler.samples if s["tps"] >= 0]
 
-    # bit-identity light fingerprint (C2 gate: async OFF vs ON MUST produce identical sky/block nibbles)
-    fp = rpc(rpc_base, "/worldgen/lightfingerprint",
-             {"x": args.fp_x, "z": args.fp_z, "radius": args.fp_r, "dim": args.dim})
+    # ── C2 byte-identity gate (BUG-085 valid harness) ──────────────────────────────────────────────
+    # The light fingerprint is only meaningful once the region's async matou apply has SETTLED. Three steps:
+    #   (1) settle barrier — poll /worldgen/lightsettle across ticks until the fp region is drained (drives
+    #       the async server apply to completion; a cold read never saw it, the BUG-085 defect);
+    #   (2) idempotence — read the fingerprint --fp-reads times; a residual relight-on-read shows as an
+    #       unstable hash (BUG-085 saw 9ef0..↔cd29..↔8b8e..). Stable ⇒ the region is genuinely settled;
+    #   (3) terrain confound — capture the block-state /worldgen/fingerprint too, so compare() can prove the
+    #       two legs are the SAME terrain before trusting any light-hash delta (a terrain divergence would
+    #       masquerade as a light divergence).
+    print(f"\n  settle barrier on fp region ({args.fp_x},{args.fp_z}) r={args.fp_r} dim={args.dim} "
+          f"(timeout {args.settle_timeout}s)")
+    settle = _settle_region(rpc_base, args.fp_x, args.fp_z, args.fp_r, args.dim,
+                            args.settle_timeout, args.settle_poll)
+    if not settle.get("drained"):
+        print(f"  ⚠️  WARN: fp region did NOT settle ({settle}) — the fingerprint below is NOT a valid gate; "
+              f"compare() will flag INCONCLUSIVE. Raise --settle-timeout or ensure the region is tickable.")
+
+    fp_reads = []
+    fp = None
+    for i in range(max(1, args.fp_reads)):
+        fp = rpc(rpc_base, "/worldgen/lightfingerprint",
+                 {"x": args.fp_x, "z": args.fp_z, "radius": args.fp_r, "dim": args.dim})
+        fp_reads.append(fp.get("combinedHash"))
+        if i < args.fp_reads - 1:
+            time.sleep(args.settle_poll)
+    fp_stable = len(fp_reads) > 0 and len(set(fp_reads)) == 1 and fp_reads[0] is not None
+    if not fp_stable:
+        print(f"  ⚠️  WARN: light fingerprint NON-IDEMPOTENT across {args.fp_reads} reads {fp_reads} — "
+              f"a relight-on-read is contaminating it (BUG-085 symptom).")
+
+    # terrain (block-state) fingerprint on the SAME region — the confound guard for compare()
+    terrain = rpc(rpc_base, "/worldgen/fingerprint",
+                  {"x": args.fp_x, "z": args.fp_z, "r": args.fp_r, "dim": args.dim})
+    terrain_hash = terrain.get("hash")
 
     light = {
         "median_add_us": median(add_series), "p95_add_us": percentile(add_series, 0.95),
@@ -542,12 +609,19 @@ def capture_light(args, rpc_base, guard):
         "idle_guard": guard,
         "light": light,
         "tick_health": tick_health,
+        # settle trace (BUG-085 barrier): drained ⇒ the async matou apply completed on the fp region before
+        # we hashed it. compare() treats a not-drained leg as INCONCLUSIVE (hash meaningless).
+        "settle": settle,
         # "hash" is the generic bit-identity field compare() gates on for BOTH metrics; combinedHash
-        # folds sky+block together, sky/blockHash kept alongside so a mismatch can be localised.
+        # folds sky+block together, sky/blockHash kept alongside so a mismatch can be localised. stable =
+        # the hash was idempotent across --fp-reads (else a relight-on-read contaminates it, BUG-085).
+        # terrain_hash = the block-state fingerprint of the SAME region: compare() requires it identical
+        # OFF vs ON before trusting any light delta (rules out the terrain-determinism confound).
         "fingerprint": {
             "x": args.fp_x, "z": args.fp_z, "radius": args.fp_r,
             "hash": fp.get("combinedHash"), "skyHash": fp.get("skyHash"), "blockHash": fp.get("blockHash"),
             "chunks": fp.get("chunks"), "sections": fp.get("sections"), "hasSky": fp.get("hasSky"),
+            "stable": fp_stable, "reads": fp_reads, "terrain_hash": terrain_hash,
         },
     }
 
@@ -565,9 +639,14 @@ def capture_light(args, rpc_base, guard):
           f"(p95 {light['p95_remove_us']:.1f}, spread ±{light['spread_remove_us']:.1f})")
     print(f"  tick-health   : median {_fmt(tick_health['median_mean_tick_ms'])} ms/tick  "
           f"min TPS {_fmt(tick_health['min_tps'])}  ({tick_health['n_samples']} samples under load)")
-    print(f"  light fingerprint: {artifact['fingerprint']['hash']}  "
+    print(f"  settle          : drained={settle.get('drained')} in {settle.get('polls')} polls "
+          f"(pending_final {settle.get('pending_final')})")
+    print(f"  light fingerprint: {artifact['fingerprint']['hash']}  stable={fp_stable}  "
           f"(sky {artifact['fingerprint']['skyHash']} / block {artifact['fingerprint']['blockHash']}, "
           f"{artifact['fingerprint']['chunks']} chunks)")
+    print(f"  terrain hash    : {terrain_hash}  (confound guard — must match OFF vs ON)")
+    if not settle.get("drained") or not fp_stable:
+        print("  ⚠️  this capture is NOT a valid gate leg (see WARNs above); compare() will report INCONCLUSIVE.")
     print(f"  written: {stem}.json  +  {stem}.md")
 
 
@@ -611,8 +690,18 @@ def _write_markdown_light(path, a):
         "",
         f"- `{fp['hash']}` (sky `{fp['skyHash']}` / block `{fp['blockHash']}`, {fp['chunks']} chunks, "
         f"{fp['sections']} sections, hasSky={fp['hasSky']}) @ ({fp['x']},{fp['z']}) radius{fp['radius']}",
+        f"- **settle**: drained={a.get('settle', {}).get('drained')} "
+        f"({a.get('settle', {}).get('polls')} polls, pending_final "
+        f"{a.get('settle', {}).get('pending_final')}) — the async matou apply must complete before the hash "
+        f"is valid (BUG-085 barrier).",
+        f"- **idempotent**: stable={fp.get('stable')} across reads `{fp.get('reads')}` — an unstable hash "
+        f"means a relight-on-read is contaminating it (not a valid gate leg).",
+        f"- **terrain confound guard**: block hash `{fp.get('terrain_hash')}` — `compare` requires this "
+        f"identical OFF vs ON before trusting the light delta.",
         "",
-        "> Frozen reference. A/B against this via `chunkgen_bench.py compare` (same --metric only).",
+        "> Frozen reference. A/B against this via `chunkgen_bench.py compare` (same --metric only). A leg with "
+        "> `drained=False` or `stable=False`, or two legs with differing terrain hashes, is reported "
+        "> **INCONCLUSIVE** (exit 4), not PASS/FAIL.",
         "",
     ]
     with open(path, "w", encoding="utf-8") as fh:
@@ -737,17 +826,55 @@ def _compare_light(base, cand):
     print(f"    baseline {_fmt(bth['median_mean_tick_ms'])}  candidate {_fmt(cth['median_mean_tick_ms'])}  "
           f"| min TPS {_fmt(bth['min_tps'])} -> {_fmt(cth['min_tps'])}")
 
+    # ── Validity gates (BUG-085): the light-hash PASS/FAIL is only meaningful if, for BOTH legs, the fp
+    # region SETTLED (async apply drained), the fingerprint was IDEMPOTENT (stable across re-reads), and the
+    # TERRAIN is bit-identical (else a terrain-determinism confound, not a light delta, drives any mismatch).
+    # Older artifacts predate these fields → default to valid (backward compatible).
+    inconclusive = []
+    for a, who in ((base, "baseline"), (cand, "candidate")):
+        s = a.get("settle") or {}
+        if "drained" in s and not s.get("drained"):
+            inconclusive.append(f"{who}: fp region did NOT settle (pending_final {s.get('pending_final')}, "
+                                f"{s.get('polls')} polls) — the async matou apply never completed, so the "
+                                f"hash is unsettled light. Raise --settle-timeout / use a tickable region.")
+        if a["fingerprint"].get("stable") is False:
+            inconclusive.append(f"{who}: light fingerprint NON-IDEMPOTENT across re-reads "
+                                f"{a['fingerprint'].get('reads')} — a relight-on-read is contaminating it "
+                                f"(the BUG-085 unstable-hash symptom).")
+    bt_h = base["fingerprint"].get("terrain_hash")
+    ct_h = cand["fingerprint"].get("terrain_hash")
+    print(f"\n  TERRAIN FINGERPRINT (confound guard — must be identical OFF vs ON):")
+    print(f"    baseline  {bt_h}")
+    print(f"    candidate {ct_h}")
+    if bt_h is not None and ct_h is not None and bt_h != ct_h:
+        inconclusive.append(f"terrain (block) fingerprint DIFFERS OFF vs ON ({bt_h} vs {ct_h}) — the two "
+                            f"legs are not the same terrain, so any light-hash delta is a terrain confound, "
+                            f"not a light divergence. Confirm terrain determinism (same seed, fresh world) "
+                            f"before gating light.")
+    elif bt_h is None or ct_h is None:
+        print(f"    -> (one leg predates the terrain-hash field — terrain confound not checked)")
+    else:
+        print(f"    -> OK: terrain bit-identical, light delta is not a terrain confound.")
+
     bh, ch = base["fingerprint"]["hash"], cand["fingerprint"]["hash"]
     print(f"\n  LIGHT FINGERPRINT (C2 bit-identity gate: sky+block nibbles, async OFF vs ON):")
-    print(f"    baseline  {bh}")
-    print(f"    candidate {ch}")
+    print(f"    baseline  {bh}  (stable {base['fingerprint'].get('stable')})")
+    print(f"    candidate {ch}  (stable {cand['fingerprint'].get('stable')})")
     identical = bh is not None and bh == ch
-    print(f"    -> {'PASS: bit-identical (light nibbles unchanged).' if identical else 'FAIL: HASH MISMATCH — the async-light path changed sky/block nibbles. This is a HARD gate; fix before trusting any speedup.'}")
 
     for a in (base, cand):
         if a.get("phosphor_booted") == "unavailable":
             print(f"\n  WARNING: {a['label']} could not verify phosphor state (ArchaicConfig reflection "
                   f"unavailable at capture time) — its phosphor label is unverified.")
+
+    if inconclusive:
+        print(f"\n  -> INCONCLUSIVE (gate not valid — do NOT read the light hash as PASS/FAIL):")
+        for reason in inconclusive:
+            print(f"       • {reason}")
+        print()
+        sys.exit(4)  # distinct from FAIL(3): the gate did not run validly, not a proven divergence
+
+    print(f"    -> {'PASS: bit-identical (light nibbles unchanged).' if identical else 'FAIL: HASH MISMATCH — the async-light path changed sky/block nibbles. This is a HARD gate; fix before trusting any speedup.'}")
 
     print()
     if not identical:
@@ -790,6 +917,15 @@ def main():
     cap.add_argument("--fp-x", type=int, default=100000, dest="fp_x", help="fingerprint origin X (fixed)")
     cap.add_argument("--fp-z", type=int, default=100000, dest="fp_z")
     cap.add_argument("--fp-r", type=int, default=4, dest="fp_r")
+    # --metric light valid-gate knobs (BUG-085): drain barrier + fingerprint idempotence.
+    cap.add_argument("--settle-timeout", type=float, default=60.0, dest="settle_timeout",
+                     help="(--metric light) max seconds to poll /worldgen/lightsettle for the fp region to "
+                          "drain the async matou apply before fingerprinting")
+    cap.add_argument("--settle-poll", type=float, default=0.5, dest="settle_poll",
+                     help="(--metric light) seconds between settle polls / idempotence re-reads")
+    cap.add_argument("--fp-reads", type=int, default=3, dest="fp_reads",
+                     help="(--metric light) times to re-read the light fingerprint to prove it is idempotent "
+                          "(unstable ⇒ a relight-on-read contaminates it, BUG-085)")
     cap.add_argument("--tick-interval", type=float, default=0.5, dest="tick_interval",
                      help="seconds between /metrics tick-health samples")
     cap.add_argument("--seed-note", default="world-fixed", dest="seed_note",
