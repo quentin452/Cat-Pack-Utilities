@@ -117,6 +117,17 @@ FORGE_SERVER_TEMPLATE = _exp(get("FORGE_SERVER_TEMPLATE", INSTANCE_SERVER))
 PRISM_ROOT = _exp(get("PRISM_ROOT",
                       os.path.join(HOME, ".local/share/PrismLauncher/instances")))
 
+# ── matoulib devtools RPC + game-gate launch ────────────────────────────────────────────────────
+# The client boot binds the devtools RPC on 127.0.0.1:25580 (a dedicated server uses an ALT port to
+# avoid the single-instance port clash — see CONTROLLER game-gate recipe). Consumed by gate.py and any
+# script that drives the RPC. PRISM_BIN = the native launcher (NOT flatpak); GATE_DISPLAY = the offscreen
+# X display headless launches render into; GATE_PLAYER = the offline pseudo the gate drives.
+RPC_HOST = get("RPC_HOST", "127.0.0.1")
+RPC_PORT = int(get("RPC_PORT", "25580"))
+PRISM_BIN = _exp(get("PRISM_BIN", "/usr/bin/prismlauncher"))
+GATE_DISPLAY = get("GATE_DISPLAY", ":2")
+GATE_PLAYER = get("GATE_PLAYER", "CatTest")
+
 # ── secrets (.env.local; never printed) ─────────────────────────────────────────────────────────
 def cf_api_key():
     return get("CF_API_KEY")
@@ -145,6 +156,9 @@ def _check():
         ("INSTANCE_SERVER_CONFIG", INSTANCE_SERVER_CONFIG),
         ("PRISM_ROOT", PRISM_ROOT),
         ("FORGE_SERVER_TEMPLATE", FORGE_SERVER_TEMPLATE),
+        ("PRISM_BIN", PRISM_BIN),
+        ("RPC_HOST", RPC_HOST), ("RPC_PORT", str(RPC_PORT)),
+        ("GATE_DISPLAY", GATE_DISPLAY), ("GATE_PLAYER", GATE_PLAYER),
     ]
     print("packenv resolved config (process-env > .env.local > .env > default):\n")
     for k, v in rows:
