@@ -86,19 +86,24 @@ def resolve_mods(args):
     """[(dest_filename, src_path)] for the required jars; error clearly if any is missing.
     UniMixins is included because matoulib's Mixin coremod cannot boot without a MixinTweaker."""
     unimixins = _find_unimixins(args.unimixins)
-    spec = [
+    # geckolib is OPTIONAL: in the current pack it is shaded into gigafauna-test.jar (the Minimal-Matou instance
+    # ships no standalone geckolib jar, and the 2-JVM dedicated boot loads gigafauna fine without it). Only require
+    # it if an explicit path or a discoverable jar exists; otherwise skip. Pass --geckolib to force-add one.
+    required = [
         ("matoulib-test.jar", args.matoulib or os.path.join(MINIMAL_MATOU_MODS, "matoulib-test.jar")),
         ("gigafauna-test.jar", args.gigafauna or os.path.join(MINIMAL_MATOU_MODS, "gigafauna-test.jar")),
-        ("geckolib-unofficial-1.0.3.jar",
-         args.geckolib or os.path.join(MINIMAL_MATOU_MODS, "geckolib-unofficial-1.0.3.jar")),
         (os.path.basename(unimixins) if unimixins else "unimixins.jar", unimixins),
     ]
     out = []
-    for name, path in spec:
+    for name, path in required:
         if not path or not os.path.isfile(path):
-            die("required jar missing: %s\n  (override with --matoulib/--gigafauna/--geckolib/--unimixins)"
-                % (path or name))
+            die("required jar missing: %s\n  (override with --matoulib/--gigafauna/--unimixins)" % (path or name))
         out.append((name, path))
+    gecko = args.geckolib or os.path.join(MINIMAL_MATOU_MODS, "geckolib-unofficial-1.0.3.jar")
+    if gecko and os.path.isfile(gecko):
+        out.append(("geckolib-unofficial-1.0.3.jar", gecko))
+    elif args.geckolib:
+        die("geckolib jar not found: %s" % args.geckolib)
     return out
 
 
