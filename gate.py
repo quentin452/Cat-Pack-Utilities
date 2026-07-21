@@ -83,11 +83,15 @@ def game_pids():
         out = subprocess.run(["jps", "-l"], capture_output=True, text=True, timeout=10).stdout
         pids = [int(ln.split()[0]) for ln in out.splitlines()
                 if any(m in ln for m in GAME_MAINS)]
-        if pids or out:
+        if pids:
             return pids
+        # jps ran but matched nothing — DON'T trust that as "no game" (jps may list the instance JVM under a
+        # main class we don't recognize, or not at all). Fall through to the cmdline pgrep below. The old
+        # `if pids or out` returned [] here -> a live in-world game read as dead (false boot-failed + kill miss).
     except Exception:
         pass
-    # jps unavailable: bracket-pgrep each main class ([o]/[n] stops pgrep matching its own cmdline).
+    # bracket-pgrep each main class on the full cmdline ([o]/[n] stops pgrep matching its own cmdline). The
+    # instance JVM's cmdline always ends in `net.minecraft.launchwrapper.Launch ...` even when jps hides it.
     pids = set()
     for pat in ("[o]rg.prismlauncher.EntryPoint", "[n]et.minecraft.launchwrapper.Launch"):
         try:
