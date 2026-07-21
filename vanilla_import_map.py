@@ -62,8 +62,30 @@ TIER_PLANCHER = "PLANCHER"   # irreducible host floor (docs/107 §0.2) — kept 
 TIER_REDUCIBLE = "REDUCIBLE"  # the real conversion surface → 0 as ownership lands
 TIER_MIXED = "MIXED"          # part host-anchor, part sheddable
 
+# Symbol-level overrides — applied BEFORE the coarse vns_group() bucketing. The raw "fml(lifecycle)" and
+# "entity" buckets over-count the irreducible floor (fable scope 2026-07-21, docs/104 §2.1 + 112): @Side/@SideOnly
+# are NOT host-floor (core is unsided), GameRegistry dies at S7, the fml-network family → MatouChannel at S2, and
+# EntityPlayer(MP) is a THIN anchor (docs/112 §3) that sheds most uses at S5 — NOT a mob-like S6 regime-c symbol.
+SYMBOL_OVERRIDE = {
+    "cpw.mods.fml.relauncher.Side": "fml(sided-annot)",
+    "cpw.mods.fml.relauncher.SideOnly": "fml(sided-annot)",
+    "cpw.mods.fml.common.registry.GameRegistry": "fml(registry)",
+    "net.minecraft.entity.player.EntityPlayer": "player(anchor)",
+    "net.minecraft.entity.player.EntityPlayerMP": "player(anchor)",
+    "net.minecraft.entity.player.InventoryPlayer": "player(inventory)",
+}
+# Prefix overrides (checked after exact SYMBOL_OVERRIDE).
+PREFIX_OVERRIDE = [
+    ("cpw.mods.fml.common.network", "fml(net)"),
+]
+
 SUBSYSTEM_MAP = {
-    "fml(lifecycle)": (TIER_PLANCHER, "107 §0.2", "host floor", "FML lifecycle + event bus = the anchor; @Side/@SideOnly are trivial annotations"),
+    "fml(lifecycle)": (TIER_MIXED, "107 §0.2 + 104 §2.3", "host floor / S5", "@Mod/proxies/lifecycle-events + FMLCommonHandler/SubscribeEvent/TickEvent (mostly → MatouClock/owned passes); true forever-floor ≈ a few dozen"),
+    "fml(sided-annot)": (TIER_REDUCIBLE, "104 §2.1", "per-class port", "@Side/@SideOnly — the core is UNSIDED (sidedness is a host concept); NOT host floor"),
+    "fml(registry)": (TIER_REDUCIBLE, "106", "S7 (Phase R)", "GameRegistry — content registration; dies at de-realization"),
+    "fml(net)": (TIER_REDUCIBLE, "95 + 106-P3", "S2", "SimpleNetworkWrapper family → MatouChannel"),
+    "player(anchor)": (TIER_MIXED, "112 §3", "S5 (lane AP/M) / anchor-forever", "EntityPlayer(MP) — thin anchor (connection identity + camera + input focus) kept; rest sheds at S5, NOT S6 regime-c"),
+    "player(inventory)": (TIER_REDUCIBLE, "95 P2", "S7", "InventoryPlayer — container/inventory, ItemKey-first"),
     "world":          (TIER_REDUCIBLE, "105 + 70 + 46", "S3/S4/S6", "World/WorldServer/Chunk/EBS/biome — the SoA-world + storage-PRIMARY lever (biggest)"),
     "client(gui/render/input)": (TIER_REDUCIBLE, "64 + 124", "S1a/S8", "Minecraft/renderer/gui — render + gui ownership (mesher/gui partly done)"),
     "entity":         (TIER_REDUCIBLE, "71/72/80/92", "S6 (regime-c)", "Entity/EntityPlayer/LivingBase — blocks regime-c until entity-SoA replaces pos/motion fields"),
@@ -91,7 +113,12 @@ ADAPTER_PACKAGES = {"devtools", "mixins"}
 
 
 def vns_group(fqn):
-    """Coarse vanilla-subsystem bucket for a fully-qualified import."""
+    """Vanilla-subsystem bucket for a fully-qualified import (symbol overrides first, then coarse namespace)."""
+    if fqn in SYMBOL_OVERRIDE:
+        return SYMBOL_OVERRIDE[fqn]
+    for prefix, group in PREFIX_OVERRIDE:
+        if fqn.startswith(prefix):
+            return group
     if fqn.startswith("cpw.mods.fml"):
         return "fml(lifecycle)"
     parts = fqn.split(".")
