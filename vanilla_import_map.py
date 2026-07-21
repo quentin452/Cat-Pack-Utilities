@@ -111,6 +111,49 @@ SUBSYSTEM_MAP = {
 # Adapter-tier matou packages: bridge by construction, excluded from the 0-import end-state (doc 104 §2.2).
 ADAPTER_PACKAGES = {"devtools", "mixins"}
 
+# ── Mixin lifecycle burn-down (hub doc 104 §1.4) ─────────────────────────────────────────────────────────
+# Every @Mixin class carries a class-javadoc `Mixin lifecycle:` line with a machine `[retires=Sx|PERM]`
+# token — the same source-of-truth the `checkMixinTags` gradle gate (matoulib-core build.gradle.kts)
+# enforces. This just renders the burn-down; it does not fail the build (that is the gradle gate's job).
+MIXIN_USE_RE = re.compile(r"@Mixin\b")
+MIXIN_LIFECYCLE_RE = re.compile(r"Mixin lifecycle:.*?\b(TRANSITIONAL|PERMANENT)\b")
+MIXIN_RETIRES_RE = re.compile(r"\[retires=(S[0-9][0-9a-z]*|PERM)\]")
+STAGE_ORDER = ["S1a", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "PERM"]
+
+
+def short_mixin_name(classname):
+    return classname[len("Mixin"):] if classname.startswith("Mixin") else classname
+
+
+def scan_mixins():
+    """Walk WALK_ROOT/mixins for @Mixin classes. Return (rows, untagged):
+    rows = sorted [(classname, kind, stage)] for every @Mixin class with a valid lifecycle tag;
+    untagged = sorted [classname] for @Mixin classes missing the tag/token (should be empty in practice —
+    the checkMixinTags gradle gate enforces this at build time). Absent `mixins` dir (other repos) -> ([], [])."""
+    mixins_dir = os.path.join(WALK_ROOT, "mixins")
+    if not os.path.isdir(mixins_dir):
+        return [], []
+    rows = []
+    untagged = []
+    for fn in sorted(os.listdir(mixins_dir)):
+        if not fn.endswith(".java"):
+            continue
+        path = os.path.join(mixins_dir, fn)
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+        if not MIXIN_USE_RE.search(text):
+            continue
+        classname = fn[: -len(".java")]
+        m_kind = MIXIN_LIFECYCLE_RE.search(text)
+        m_stage = MIXIN_RETIRES_RE.search(text)
+        if m_kind and m_stage:
+            rows.append((classname, m_kind.group(1), m_stage.group(1)))
+        else:
+            untagged.append(classname)
+    rows.sort()
+    untagged.sort()
+    return rows, untagged
+
 
 def vns_group(fqn):
     """Vanilla-subsystem bucket for a fully-qualified import (symbol overrides first, then coarse namespace)."""
@@ -227,6 +270,45 @@ def render_md(agg):
         tier = "ADAPTER" if p in ADAPTER_PACKAGES else "reducible/core"
         L.append(f"| {p} | {count} | {len(agg['pkg_files'][p])} | {tier} |")
     L.append("")
+
+    # ── Mixin lifecycle burn-down (docs/104 §1.4) ──
+    mixin_rows, mixin_untagged = scan_mixins()
+    if mixin_rows or mixin_untagged:
+        total_mixins = len(mixin_rows)
+        by_stage = collections.defaultdict(list)
+        for classname, _kind, stage in mixin_rows:
+            by_stage[stage].append(classname)
+        perm_count = len(by_stage.get("PERM", []))
+        trans_count = total_mixins - perm_count
+
+        present = set(by_stage)
+        known = [s for s in STAGE_ORDER if s != "PERM" and s in present]
+        unknown = sorted(s for s in present if s not in STAGE_ORDER)
+        order = known + unknown + (["PERM"] if "PERM" in present else [])
+
+        L.append("## Mixin lifecycle burn-down (docs/104 §1.4 — which mixins survive the husk)")
+        L.append("")
+        L.append(f"**End-state mixin floor (PERM only): {perm_count}** · peak (all {total_mixins} coexist "
+                 f"during conversion) — the {trans_count} TRANSITIONAL fall as their stage lands. Render "
+                 "mixins tagged S1a = docs/64 render lane (approximate; not husk-gated).")
+        L.append("")
+        if mixin_untagged:
+            L.append(f"**WARNING: {len(mixin_untagged)} @Mixin file(s) missing a valid "
+                     "`[retires=Sx|PERM]` lifecycle tag: " + ", ".join(mixin_untagged) +
+                     " — regenerate after fixing (docs/104 §1.4).**")
+            L.append("")
+        L.append("| retires at | # mixins | cumulative alive-after | mixins |")
+        L.append("|---|---:|---:|---|")
+        cumulative_retired = 0
+        for stage in order:
+            names = sorted(by_stage.get(stage, []))
+            count = len(names)
+            if stage != "PERM":
+                cumulative_retired += count
+            alive_after = total_mixins - cumulative_retired
+            short_names = ", ".join(short_mixin_name(n) for n in names)
+            L.append(f"| {stage} | {count} | {alive_after} | {short_names} |")
+        L.append("")
 
     # ── Top concrete symbols (the worklist) ──
     L.append("## Top vanilla symbols by coupling (files depending) — the concrete replace-worklist")
