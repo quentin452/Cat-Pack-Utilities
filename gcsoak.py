@@ -39,6 +39,8 @@ def main():
     ap.add_argument("--max-minor-gc", type=int, default=0, help="pass if minor-GC delta <= this (default 0)")
     ap.add_argument("--host", default=getattr(E, "RPC_HOST", "127.0.0.1"))
     ap.add_argument("--port", type=int, default=getattr(E, "RPC_PORT", 25580))
+    ap.add_argument("--interval", type=float, default=30.0,
+                    help="progress/liveness re-poll cadence in seconds (default 30)")
     a = ap.parse_args()
     base = f"http://{a.host}:{a.port}"
 
@@ -51,13 +53,19 @@ def main():
     cols = ", ".join(c["name"] for c in s.get("collectors", []))
     print(f"start: minorGc={m0} minorGcMs={ms0} majorGc={maj0}  collectors=[{cols}]")
     print(f"soaking {a.minutes} min (leave the game idle/in-world)...")
-    time.sleep(a.minutes * 60)
-
-    try:
-        e = _gcstats(base)
-    except Exception as ex:  # noqa: BLE001
-        print(f"SETUP ERROR: /gcstats gone ({ex}) — game died mid-soak?")
-        return 2
+    # Re-poll each interval instead of one blocking sleep: shows the delta climbing + aborts EARLY if the game
+    # dies mid-soak (a monolithic sleep would waste the whole window then fail at the end).
+    end = time.monotonic() + a.minutes * 60.0
+    e = s
+    while time.monotonic() < end:
+        time.sleep(min(a.interval, max(1.0, end - time.monotonic())))
+        try:
+            e = _gcstats(base)
+        except Exception as ex:  # noqa: BLE001
+            print(f"ERROR: /gcstats gone ({ex}) — game died mid-soak, result INVALID.")
+            return 2
+        left = max(0.0, end - time.monotonic())
+        print(f"  +{a.minutes - left / 60.0:.1f} min: minorGc delta={e['minorGc'] - m0}  ({left / 60.0:.1f} min left)")
     dm = e["minorGc"] - m0
     dms = e["minorGcMs"] - ms0
     dmaj = e["majorGc"] - maj0

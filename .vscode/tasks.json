@@ -23,6 +23,12 @@
       "default": "60"
     },
     {
+      "id": "soakMinutes",
+      "type": "promptString",
+      "description": "GC-soak window (minutes) — leave the game idle/in-world",
+      "default": "5"
+    },
+    {
       "id": "sparkProfileFile",
       "type": "promptString",
       "description": "Path to a .sparkprofile file (e.g. ~/Téléchargements/xxx.sparkprofile or an instance config/profile-*.sparkprofile)",
@@ -191,6 +197,13 @@
       "type": "shell",
       "command": "python3 arch_map.py",
       "detail": "Statically AST-scan every *.py in this repo (no imports/execution) and regenerate ARCHITECTURE.md \u2014 a Mermaid diagram + overview table showing which script imports which, and which packenv data artifact (bundles, manifest, repos.json, instances, CF/Modrinth secrets) each one touches. Run after adding/removing a script or a packenv key; `python3 arch_map.py --check` (exit non-zero if stale) is the CI/preflight form.",
+      "problemMatcher": []
+    },
+    {
+      "label": "S0: in-game minor-GC soak (referee)",
+      "type": "shell",
+      "command": "python3 gcsoak.py --minutes ${input:soakMinutes}",
+      "detail": "S0 GC-soak referee (doc 107 §5 / docs/105 §506): with a game in-world (RPC up), poll /gcstats at start + after N min and gate on the young-gen (minor) GC delta (PASS if <= --max-minor-gc, default 0). Complements the CI zero-alloc unit gates by measuring the MC-coupled render/mixin/tick paths; re-polls each --interval (progress + aborts early if the game dies). SINGLE-INSTANCE. The binding zero holds at the husk; today it MEASURES the drift.",
       "problemMatcher": []
     },
     {
