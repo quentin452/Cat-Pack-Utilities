@@ -38,6 +38,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import packenv as E  # noqa: E402
 
 GAME_MAIN = "org.prismlauncher.EntryPoint"
+# The live game is TWO cooperating JVMs: the Prism launcher wrapper (EntryPoint) AND the actual instance
+# JVM it spawns, whose main class is LaunchWrapper. Matching only EntryPoint missed the in-world game JVM
+# (jps listed it but not under EntryPoint) -> game_pids() returned [] mid-boot -> a FALSE "boot-failed"
+# (and kill_stale left the real JVM alive). Match either main class.
+GAME_MAINS = ("org.prismlauncher.EntryPoint", "net.minecraft.launchwrapper.Launch")
 
 
 def _mc(instance):
@@ -76,17 +81,21 @@ def game_pids():
     fall back to a bracket-pgrep (the [o] stops pgrep matching its own cmdline)."""
     try:
         out = subprocess.run(["jps", "-l"], capture_output=True, text=True, timeout=10).stdout
-        pids = [int(ln.split()[0]) for ln in out.splitlines() if GAME_MAIN in ln]
+        pids = [int(ln.split()[0]) for ln in out.splitlines()
+                if any(m in ln for m in GAME_MAINS)]
         if pids or out:
             return pids
     except Exception:
         pass
-    try:
-        out = subprocess.run(["pgrep", "-f", "[o]rg.prismlauncher.EntryPoint"],
-                             capture_output=True, text=True, timeout=10).stdout
-        return [int(x) for x in out.split()]
-    except Exception:
-        return []
+    # jps unavailable: bracket-pgrep each main class ([o]/[n] stops pgrep matching its own cmdline).
+    pids = set()
+    for pat in ("[o]rg.prismlauncher.EntryPoint", "[n]et.minecraft.launchwrapper.Launch"):
+        try:
+            out = subprocess.run(["pgrep", "-f", pat], capture_output=True, text=True, timeout=10).stdout
+            pids.update(int(x) for x in out.split())
+        except Exception:
+            pass
+    return list(pids)
 
 
 def kill_stale(hard_wait=8):
