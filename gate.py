@@ -197,6 +197,10 @@ def launch(args):
                 if st.get("playerDead"):
                     print("FAILED: player is DEAD at spawn (world/health issue)\n--- log tail ---\n" + _log_tail(log))
                     return 1
+                if st.get("disconnected"):
+                    reason = st.get("disconnectReason") or "connection lost (kick / mod-rejection / timeout)"
+                    print("FAILED: client DISCONNECTED: %s\n--- log tail ---\n%s" % (reason, _log_tail(log)))
+                    return 1
                 pl = st.get("player")
                 screen = st.get("currentScreen")
                 if pl and not screen:
