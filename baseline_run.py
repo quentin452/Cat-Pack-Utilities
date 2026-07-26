@@ -34,6 +34,8 @@ BASE = f"http://{E.RPC_HOST}:{E.RPC_PORT}"
 YAWS = (0.0, 90.0, 180.0, 270.0)
 TICKS_PER_SEGMENT = 200  # ~10 s at 20 tps
 PITCH = 0.0
+# A sprinting player covers ~56 blocks in 200 ticks. Well under that means terrain stopped the run.
+MIN_SEGMENT_BLOCKS = 25.0
 
 
 def rpc(path, **params):
@@ -44,15 +46,59 @@ def rpc(path, **params):
         return json.loads(resp.read().decode("utf-8"))
 
 
+def wait_move_done(expected_ticks, poll=0.25):
+    """Block until the move driver reports it is finished.
+
+    /playermove INSTALLS a driver and returns immediately — it does not run for `ticks`. Firing the next
+    segment without waiting silently overwrites the previous one, which is exactly how the first run of this
+    script "completed" 160 seconds of traversal in 2 seconds and produced a meaningless baseline. So the wait
+    is mandatory, and a timeout fails loudly rather than yielding numbers that look plausible.
+    """
+    deadline = time.time() + expected_ticks / 20.0 + 15.0
+    seen_running = False
+    while time.time() < deadline:
+        try:
+            tr = rpc("/playermove/trace")
+        except Exception:
+            time.sleep(poll)
+            continue
+        running = bool(tr.get("running"))
+        if running:
+            seen_running = True
+        elif seen_running:
+            return tr
+        time.sleep(poll)
+    sys.exit("segment did not finish within its deadline — refusing to produce a bogus baseline")
+
+
+def displacement(trace):
+    """Horizontal distance actually covered by a segment.
+
+    A sprint into a hillside still reports its full tick count while the player has not moved, so no chunks
+    stream and the run measures an idle camera. Distance is the only signal that separates "traversed" from
+    "pressed forward against a wall", so it is checked rather than assumed.
+    """
+    s = trace.get("samples") or []
+    if len(s) < 2:
+        return 0.0
+    x0, z0 = s[0][1], s[0][3]
+    x1, z1 = s[-1][1], s[-1][3]
+    return ((x1 - x0) ** 2 + (z1 - z0) ** 2) ** 0.5
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--laps", type=int, default=4, help="laps of 4 segments (default 4 ~= 4 min)")
+    ap.add_argument("--headings", default=",".join(str(int(y)) for y in YAWS),
+                    help="comma-separated yaws to traverse. Pick ones that are CLEAR at the start point: a "
+                         "blocked heading streams no chunks. Both baselines must use the same value.")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
-    segments = args.laps * len(YAWS)
+    yaws = [float(y) for y in args.headings.split(",") if y.strip()]
+    segments = args.laps * len(yaws)
     seconds = segments * TICKS_PER_SEGMENT / 20.0
-    plan = (f"{args.laps} laps x {len(YAWS)} headings x {TICKS_PER_SEGMENT} ticks "
+    plan = (f"{args.laps} laps x headings[{args.headings}] x {TICKS_PER_SEGMENT} ticks "
             f"= {segments} segments, ~{seconds:.0f}s sprinting")
     print(f"scenario: {plan}")
     if args.dry_run:
@@ -65,15 +111,29 @@ def main():
     if not pong.get("inWorld"):
         sys.exit("client is not in a world — enter one first, the traversal needs a loaded world")
 
+    blocked = []
     started = time.time()
     for lap in range(args.laps):
-        for yaw in YAWS:
+        for yaw in yaws:
             rpc("/look", yaw=yaw, pitch=PITCH)
             rpc("/playermove", forward=1, sprint="true", ticks=TICKS_PER_SEGMENT, yaw=yaw)
-            print(f"  lap {lap + 1}/{args.laps} yaw {yaw:>5.0f} done")
+            tr = wait_move_done(TICKS_PER_SEGMENT)
+            dist = displacement(tr)
+            blocked.append(dist < MIN_SEGMENT_BLOCKS)
+            flag = "  BLOCKED" if dist < MIN_SEGMENT_BLOCKS else ""
+            print(f"  lap {lap + 1}/{args.laps} yaw {yaw:>5.0f}: {tr.get('ticks', 0)} ticks,"
+                  f" {dist:.0f} blocks{flag}")
     elapsed = time.time() - started
 
-    print(f"traversal complete in {elapsed:.0f}s")
+    expected = segments * TICKS_PER_SEGMENT / 20.0
+    print(f"traversal complete in {elapsed:.0f}s (expected ~{expected:.0f}s)")
+    if elapsed < expected * 0.5:
+        sys.exit("ran far too fast — segments did not actually execute; the baseline is NOT valid")
+    n_blocked = sum(blocked)
+    if n_blocked:
+        print(f"  WARNING: {n_blocked}/{len(blocked)} segments were terrain-blocked (<{MIN_SEGMENT_BLOCKS:.0f} blocks)")
+        if n_blocked > len(blocked) // 4:
+            sys.exit("too many blocked segments — little chunk streaming happened; the baseline is NOT valid")
     try:
         gc = rpc("/gcstats")
         print(f"  gc: minor={gc.get('minorGc')} ({gc.get('minorGcMs')}ms) "
