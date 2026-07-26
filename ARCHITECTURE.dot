@@ -6,6 +6,7 @@ digraph arch {
   S_MainClass [label="MainClass.py", fillcolor="#1f6feb", fontcolor="white"];
   S_arch_map [label="arch_map.py", fillcolor="#1f6feb", fontcolor="white"];
   S_baseline_capture [label="baseline_capture.py", fillcolor="#1f6feb", fontcolor="white"];
+  S_baseline_pair [label="baseline_pair.py", fillcolor="#1f6feb", fontcolor="white"];
   S_baseline_run [label="baseline_run.py", fillcolor="#1f6feb", fontcolor="white"];
   S_boot_crash_scan [label="boot_crash_scan.py", fillcolor="#1f6feb", fontcolor="white"];
   S_boot_profiler [label="boot_profiler.py", fillcolor="#1f6feb", fontcolor="white"];
@@ -100,6 +101,7 @@ digraph arch {
   S_baseline_capture -> D_ART_OTHER_INSTANCE_MATOU [style=dashed];
   S_baseline_capture -> D_ART_OTHER_INSTANCE_MATOU_CONFIG [style=dashed];
   S_baseline_capture -> D_ART_REPOS_JSON [style=dashed];
+  S_baseline_pair -> D_ART_HUB [style=dashed];
   S_baseline_run -> D_ART_OTHER_RPC_HOST [style=dashed];
   S_baseline_run -> D_ART_OTHER_RPC_PORT [style=dashed];
   S_bundle_check -> D_ART_SECRETS [style=dashed];
