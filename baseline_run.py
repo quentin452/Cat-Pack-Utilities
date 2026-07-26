@@ -9,9 +9,15 @@ identical action sequence every time, so the only variable left is the flag prof
 Deterministic by construction: fixed yaw sequence, fixed segment length, fixed sprint state. No randomness,
 no wall-clock pacing decisions.
 
+By default the traversal arms /noclip (FLIGHT + noClip) before the segments and disarms it after, so the
+run no longer depends on WHERE the player spawns: a relaunch that respawns over a hillside or a ravine no
+longer terrain-blocks a segment (<25 blocks moved), which used to make baseline_pair.py refuse to produce a
+baseline. Both baselines of a pair must use the same --noclip/--altitude values, same as --headings.
+
 Usage:
-  python3 baseline_run.py --laps 4                  # ~4 min of sprinting traversal
+  python3 baseline_run.py --laps 4                  # ~4 min of noclip-sprinting traversal
   python3 baseline_run.py --laps 4 --dry-run        # print the plan, touch nothing
+  python3 baseline_run.py --laps 4 --no-noclip      # old terrain-dependent ground traversal
 
 Prerequisites: the client is running, in a world, with matoulib.rpc=true and
 matoulib.engine.frameStats=true. Capture afterwards with baseline_capture.py.
@@ -34,8 +40,13 @@ BASE = f"http://{E.RPC_HOST}:{E.RPC_PORT}"
 YAWS = (0.0, 90.0, 180.0, 270.0)
 TICKS_PER_SEGMENT = 200  # ~10 s at 20 tps
 PITCH = 0.0
+DEFAULT_ALTITUDE = 120.0
 # A sprinting player covers ~56 blocks in 200 ticks. Well under that means terrain stopped the run.
 MIN_SEGMENT_BLOCKS = 25.0
+# In flight, /noclip's contract says sprint doubles fly speed, so a segment covers ~2x the ground distance.
+# Using the ground threshold under noclip would flag every real segment as "blocked" (false positive), so
+# the floor scales with the same multiplier — the "did it actually move" check stays meaningful either way.
+NOCLIP_SPEED_MULTIPLIER = 2.0
 
 
 def rpc(path, **params):
@@ -92,14 +103,23 @@ def main():
     ap.add_argument("--headings", default=",".join(str(int(y)) for y in YAWS),
                     help="comma-separated yaws to traverse. Pick ones that are CLEAR at the start point: a "
                          "blocked heading streams no chunks. Both baselines must use the same value.")
+    ap.add_argument("--noclip", dest="noclip", action="store_true", default=True,
+                    help="arm /noclip (FLIGHT + noClip) before the traversal so it no longer depends on "
+                         "WHERE the player spawns (default: on). Both baselines must use the same value.")
+    ap.add_argument("--no-noclip", dest="noclip", action="store_false",
+                    help="disable noclip and fall back to the old terrain-dependent ground traversal.")
+    ap.add_argument("--altitude", type=float, default=DEFAULT_ALTITUDE,
+                    help=f"altitude to teleport to when arming noclip (default {DEFAULT_ALTITUDE:.0f}). "
+                         "Both baselines must use the same value.")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
     yaws = [float(y) for y in args.headings.split(",") if y.strip()]
     segments = args.laps * len(yaws)
     seconds = segments * TICKS_PER_SEGMENT / 20.0
+    noclip_desc = f", noclip @ y={args.altitude:.0f}" if args.noclip else ", no noclip (ground)"
     plan = (f"{args.laps} laps x headings[{args.headings}] x {TICKS_PER_SEGMENT} ticks "
-            f"= {segments} segments, ~{seconds:.0f}s sprinting")
+            f"= {segments} segments, ~{seconds:.0f}s sprinting{noclip_desc}")
     print(f"scenario: {plan}")
     if args.dry_run:
         return
@@ -111,19 +131,34 @@ def main():
     if not pong.get("inWorld"):
         sys.exit("client is not in a world — enter one first, the traversal needs a loaded world")
 
-    blocked = []
-    started = time.time()
-    for lap in range(args.laps):
-        for yaw in yaws:
-            rpc("/look", yaw=yaw, pitch=PITCH)
-            rpc("/playermove", forward=1, sprint="true", ticks=TICKS_PER_SEGMENT, yaw=yaw)
-            tr = wait_move_done(TICKS_PER_SEGMENT)
-            dist = displacement(tr)
-            blocked.append(dist < MIN_SEGMENT_BLOCKS)
-            flag = "  BLOCKED" if dist < MIN_SEGMENT_BLOCKS else ""
-            print(f"  lap {lap + 1}/{args.laps} yaw {yaw:>5.0f}: {tr.get('ticks', 0)} ticks,"
-                  f" {dist:.0f} blocks{flag}")
-    elapsed = time.time() - started
+    min_segment_blocks = MIN_SEGMENT_BLOCKS * (NOCLIP_SPEED_MULTIPLIER if args.noclip else 1.0)
+
+    if args.noclip:
+        armed = rpc("/noclip", on="true", y=args.altitude)
+        if not armed.get("ok"):
+            sys.exit(f"/noclip arm failed: {armed.get('error')}")
+
+    try:
+        blocked = []
+        started = time.time()
+        for lap in range(args.laps):
+            for yaw in yaws:
+                rpc("/look", yaw=yaw, pitch=PITCH)
+                rpc("/playermove", forward=1, sprint="true", ticks=TICKS_PER_SEGMENT, yaw=yaw)
+                tr = wait_move_done(TICKS_PER_SEGMENT)
+                dist = displacement(tr)
+                blocked.append(dist < min_segment_blocks)
+                flag = "  BLOCKED" if dist < min_segment_blocks else ""
+                print(f"  lap {lap + 1}/{args.laps} yaw {yaw:>5.0f}: {tr.get('ticks', 0)} ticks,"
+                      f" {dist:.0f} blocks{flag}")
+        elapsed = time.time() - started
+    finally:
+        # Disarm even if a segment above threw (sys.exit in wait_move_done, RPC error, ...) — leaving the
+        # player flying/noclipping into a bad baseline capture is worse than a partially-run traversal.
+        if args.noclip:
+            disarmed = rpc("/noclip", on="false")
+            if not disarmed.get("ok"):
+                print(f"  WARNING: /noclip disarm failed: {disarmed.get('error')}")
 
     expected = segments * TICKS_PER_SEGMENT / 20.0
     print(f"traversal complete in {elapsed:.0f}s (expected ~{expected:.0f}s)")
@@ -131,7 +166,7 @@ def main():
         sys.exit("ran far too fast — segments did not actually execute; the baseline is NOT valid")
     n_blocked = sum(blocked)
     if n_blocked:
-        print(f"  WARNING: {n_blocked}/{len(blocked)} segments were terrain-blocked (<{MIN_SEGMENT_BLOCKS:.0f} blocks)")
+        print(f"  WARNING: {n_blocked}/{len(blocked)} segments were terrain-blocked (<{min_segment_blocks:.0f} blocks)")
         if n_blocked > len(blocked) // 4:
             sys.exit("too many blocked segments — little chunk streaming happened; the baseline is NOT valid")
     try:
