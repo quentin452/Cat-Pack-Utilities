@@ -87,13 +87,26 @@ def main():
     ap.add_argument("--only", choices=["a", "b"], help="run a single profile instead of the pair")
     ap.add_argument("--deploy", action="store_true", help="build + deploy the jar before each run")
     ap.add_argument("--launch-timeout", type=int, default=180)
+    ap.add_argument("--keep-alive", action="store_true",
+                    help="leave the client running at the end (to inspect it). Default stops it: the instance "
+                         "is single-instance, so a forgotten client blocks the next gate and makes deploy.sh "
+                         "refuse to copy the jar (BUG-126).")
     args = ap.parse_args()
 
     profiles = [args.only] if args.only else ["b", "a"]
-    for p in profiles:
-        one(p, args)
+    try:
+        for p in profiles:
+            one(p, args)
+    finally:
+        # BUG-126: must also run on the sys.exit path — an aborted run used to leave the client alive, and
+        # the next gate then collides on the single RPC port while deploy.sh refuses to copy the jar.
+        if args.keep_alive:
+            print("\n--keep-alive: client left running.")
+        else:
+            print("\nstopping the client (--keep-alive to leave it up)")
+            subprocess.run([sys.executable, os.path.join(HERE, "gate.py"), "stop"], check=False)
 
-    print("\nboth captures live under memory/bench-captures/matou-engine-t02/ — review, then commit.")
+    print("\ncaptures live under memory/bench-captures/matou-engine-t02/ — review, then commit.")
     print("NOTE: the captures are gitignored; add them with -f, deliberately.")
 
 
