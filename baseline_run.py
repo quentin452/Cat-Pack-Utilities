@@ -82,6 +82,23 @@ def wait_move_done(expected_ticks, poll=0.25):
     sys.exit("segment did not finish within its deadline — refusing to produce a bogus baseline")
 
 
+def check_altitude(trace, altitude, tolerance=8.0):
+    """Fail loudly if the player left the altitude the traversal was armed at.
+
+    noClip without flight is a fall through solid ground: the run keeps reporting ticks while the player drops,
+    and past y=-64 it dies in the void. That happened, and the segment only surfaced as a generic timeout. The
+    altitude is therefore checked per segment — a run that fell is not a slow run, it is a void run, and it must
+    not reach the capture step.
+    """
+    s = trace.get("samples") or []
+    if not s:
+        return
+    y = s[-1][2]
+    if abs(y - altitude) > tolerance:
+        sys.exit(f"player left the armed altitude (y={y:.1f}, armed y={altitude:.1f}) — the noclip hold failed"
+                 f" and the run is falling, NOT traversing; refusing to produce a baseline")
+
+
 def displacement(trace):
     """Horizontal distance actually covered by a segment.
 
@@ -146,6 +163,8 @@ def main():
                 rpc("/look", yaw=yaw, pitch=PITCH)
                 rpc("/playermove", forward=1, sprint="true", ticks=TICKS_PER_SEGMENT, yaw=yaw)
                 tr = wait_move_done(TICKS_PER_SEGMENT)
+                if args.noclip:
+                    check_altitude(tr, args.altitude)
                 dist = displacement(tr)
                 blocked.append(dist < min_segment_blocks)
                 flag = "  BLOCKED" if dist < min_segment_blocks else ""
