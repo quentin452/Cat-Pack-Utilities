@@ -68,11 +68,17 @@ def one(profile, args):
     run([sys.executable, os.path.join(HERE, "gate.py"), "launch", args.instance,
          "--timeout", str(args.launch_timeout)])
 
+    # noclip/altitude are passed EXPLICITLY rather than left to baseline_run's defaults: they change what the
+    # traversal physically does, so they belong in the recorded scenario, not in a default that can drift.
     traversal = [sys.executable, os.path.join(HERE, "baseline_run.py"),
-                 "--laps", str(args.laps), "--headings", args.headings]
+                 "--laps", str(args.laps), "--headings", args.headings,
+                 "--noclip" if args.noclip else "--no-noclip"]
+    if args.noclip:
+        traversal += ["--altitude", str(args.altitude)]
     run(traversal)
 
-    note = (f"scripted+automated: {args.laps} laps x headings[{args.headings}] x 200 ticks "
+    motion = f"noclip @ y={args.altitude:.0f}" if args.noclip else "ground sprint"
+    note = (f"scripted+automated: {args.laps} laps x headings[{args.headings}] x 200 ticks, {motion} "
             f"(baseline_pair.py, profile {profile})")
     run([sys.executable, os.path.join(HERE, "baseline_capture.py"), "--label", label, "--note", note])
 
@@ -84,6 +90,13 @@ def main():
     ap.add_argument("--headings", default="90,270",
                     help="must be CLEAR at the spawn point — a blocked heading streams no chunks. "
                          "The SAME value is used for both profiles, which is what makes them comparable.")
+    ap.add_argument("--noclip", dest="noclip", action="store_true", default=True,
+                    help="traverse with FLIGHT + noClip armed (default: on), so the run does not depend on "
+                         "where the player respawns. Applied identically to both profiles.")
+    ap.add_argument("--no-noclip", dest="noclip", action="store_false",
+                    help="fall back to the terrain-dependent ground traversal (headings must then be clear).")
+    ap.add_argument("--altitude", type=float, default=120.0,
+                    help="altitude flown when noclip is armed (default 120). Same for both profiles.")
     ap.add_argument("--only", choices=["a", "b"], help="run a single profile instead of the pair")
     ap.add_argument("--deploy", action="store_true", help="build + deploy the jar before each run")
     ap.add_argument("--launch-timeout", type=int, default=180)
