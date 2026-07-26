@@ -5,6 +5,7 @@ digraph arch {
   S__installdependencies [label="!installdependencies.py", fillcolor="#1f6feb", fontcolor="white"];
   S_MainClass [label="MainClass.py", fillcolor="#1f6feb", fontcolor="white"];
   S_arch_map [label="arch_map.py", fillcolor="#1f6feb", fontcolor="white"];
+  S_baseline_capture [label="baseline_capture.py", fillcolor="#1f6feb", fontcolor="white"];
   S_boot_crash_scan [label="boot_crash_scan.py", fillcolor="#1f6feb", fontcolor="white"];
   S_boot_profiler [label="boot_profiler.py", fillcolor="#1f6feb", fontcolor="white"];
   S_bundle_check [label="bundle_check.py", fillcolor="#1f6feb", fontcolor="white"];
@@ -69,6 +70,8 @@ digraph arch {
   D_ART_OTHER_FORGE_SERVER_TEMPLATE [label="packenv.FORGE_SERVER_TEMPLATE (unclassified)", shape=cylinder, fillcolor="#f2cc60"];
   D_ART_OTHER_GATE_DISPLAY [label="packenv.GATE_DISPLAY (unclassified)", shape=cylinder, fillcolor="#f2cc60"];
   D_ART_OTHER_GATE_PLAYER [label="packenv.GATE_PLAYER (unclassified)", shape=cylinder, fillcolor="#f2cc60"];
+  D_ART_OTHER_INSTANCE_MATOU [label="packenv.INSTANCE_MATOU (unclassified)", shape=cylinder, fillcolor="#f2cc60"];
+  D_ART_OTHER_INSTANCE_MATOU_CONFIG [label="packenv.INSTANCE_MATOU_CONFIG (unclassified)", shape=cylinder, fillcolor="#f2cc60"];
   D_ART_OTHER_PRISM_BIN [label="packenv.PRISM_BIN (unclassified)", shape=cylinder, fillcolor="#f2cc60"];
   D_ART_OTHER_PRISM_ROOT [label="packenv.PRISM_ROOT (unclassified)", shape=cylinder, fillcolor="#f2cc60"];
   D_ART_OTHER_RPC_HOST [label="packenv.RPC_HOST (unclassified)", shape=cylinder, fillcolor="#f2cc60"];
@@ -92,6 +95,10 @@ digraph arch {
   S_release_pack -> S_changelog_from_bundles;
   S_release_pack -> S_release_log;
   S_release_pack -> S_release_mods;
+  S_baseline_capture -> D_ART_OTHER_BENCH_CAPTURES [style=dashed];
+  S_baseline_capture -> D_ART_OTHER_INSTANCE_MATOU [style=dashed];
+  S_baseline_capture -> D_ART_OTHER_INSTANCE_MATOU_CONFIG [style=dashed];
+  S_baseline_capture -> D_ART_REPOS_JSON [style=dashed];
   S_bundle_check -> D_ART_SECRETS [style=dashed];
   S_bundle_check -> D_ART_PACK_DIR [style=dashed];
   S_bundle_drift -> D_ART_SECRETS [style=dashed];
