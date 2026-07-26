@@ -117,6 +117,13 @@ FORGE_SERVER_TEMPLATE = _exp(get("FORGE_SERVER_TEMPLATE", INSTANCE_SERVER))
 PRISM_ROOT = _exp(get("PRISM_ROOT",
                       os.path.join(HOME, ".local/share/PrismLauncher/instances")))
 
+# The Minimal-Matou Prism instance = the matou DEV target (matoulib / gigafauna / OaT / MatouMap test
+# jars land here). Named because 2+ consumers need it: scripts/deploy.sh and the matou-engine workflow
+# layer — the "recurring canonical value goes in packenv, never re-derived" rule.
+INSTANCE_MATOU = _exp(get("INSTANCE_MATOU", os.path.join(PRISM_ROOT, "Minimal-Matou", "minecraft")))
+INSTANCE_MATOU_MODS = os.path.join(INSTANCE_MATOU, "mods")
+INSTANCE_MATOU_CONFIG = os.path.join(INSTANCE_MATOU, "config")
+
 # ── matoulib devtools RPC + game-gate launch ────────────────────────────────────────────────────
 # The client boot binds the devtools RPC on 127.0.0.1:25580 (a dedicated server uses an ALT port to
 # avoid the single-instance port clash — see CONTROLLER game-gate recipe). Consumed by gate.py and any
@@ -155,6 +162,9 @@ def _check():
         ("INSTANCE_TEST_CONFIG", INSTANCE_TEST_CONFIG),
         ("INSTANCE_SERVER_CONFIG", INSTANCE_SERVER_CONFIG),
         ("PRISM_ROOT", PRISM_ROOT),
+        ("INSTANCE_MATOU", INSTANCE_MATOU),
+        ("INSTANCE_MATOU_MODS", INSTANCE_MATOU_MODS),
+        ("INSTANCE_MATOU_CONFIG", INSTANCE_MATOU_CONFIG),
         ("FORGE_SERVER_TEMPLATE", FORGE_SERVER_TEMPLATE),
         ("PRISM_BIN", PRISM_BIN),
         ("RPC_HOST", RPC_HOST), ("RPC_PORT", str(RPC_PORT)),

@@ -17,9 +17,11 @@ digraph arch {
   S_changelog_from_git [label="changelog_from_git.py", fillcolor="#1f6feb", fontcolor="white"];
   S_chunkgen_bench [label="chunkgen_bench.py", fillcolor="#1f6feb", fontcolor="white"];
   S_config_sync [label="config_sync.py", fillcolor="#1f6feb", fontcolor="white"];
+  S_decouple_dag [label="decouple_dag.py", fillcolor="#1f6feb", fontcolor="white"];
   S_deploy_prism [label="deploy_prism.py", fillcolor="#1f6feb", fontcolor="white"];
   S_dist_parity [label="dist_parity.py", fillcolor="#1f6feb", fontcolor="white"];
   S_gate [label="gate.py", fillcolor="#1f6feb", fontcolor="white"];
+  S_gcsoak [label="gcsoak.py", fillcolor="#1f6feb", fontcolor="white"];
   S_gen_legacy_hashes [label="gen_legacy_hashes.py", fillcolor="#1f6feb", fontcolor="white"];
   S_gen_placeholder_logos [label="gen_placeholder_logos.py", fillcolor="#1f6feb", fontcolor="white"];
   S_housekeep [label="housekeep.py", fillcolor="#1f6feb", fontcolor="white"];
@@ -51,6 +53,7 @@ digraph arch {
   S_triage_forks [label="triage_forks.py", fillcolor="#1f6feb", fontcolor="white"];
   S_update_local [label="update_local.py", fillcolor="#1f6feb", fontcolor="white"];
   S_uv_template [label="uv_template.py", fillcolor="#1f6feb", fontcolor="white"];
+  S_vanilla_import_map [label="vanilla_import_map.py", fillcolor="#1f6feb", fontcolor="white"];
   S_wiki_sync [label="wiki_sync.py", fillcolor="#1f6feb", fontcolor="white"];
 
   D_ART_SECRETS [label=".env secrets (CF/Modrinth tokens)", shape=cylinder, fillcolor="#f2cc60"];
@@ -75,6 +78,7 @@ digraph arch {
   D_ART_URL_BUNDLE [label="url.bundle.json", shape=cylinder, fillcolor="#f2cc60"];
 
   S_bundle_regression_gate -> S_changelog_from_bundles;
+  S_decouple_dag -> S_vanilla_import_map;
   S_dist_parity -> S_release_mods;
   S_matou_bench -> S_chunkgen_bench;
   S_matou_server_smoke -> S_boot_crash_scan;
@@ -169,5 +173,6 @@ digraph arch {
   S_update_local -> D_ART_INSTANCE_SERVER [style=dashed];
   S_update_local -> D_ART_INSTANCE_TEST [style=dashed];
   S_update_local -> D_ART_RELEASE_MANIFEST [style=dashed];
+  S_vanilla_import_map -> D_ART_REPOS_JSON [style=dashed];
   S_wiki_sync -> D_ART_HUB [style=dashed];
 }
